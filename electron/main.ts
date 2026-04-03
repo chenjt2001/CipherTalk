@@ -62,7 +62,7 @@ protocol.registerSchemesAsPrivileged([
 // 配置自动更新
 autoUpdater.autoDownload = false
 autoUpdater.autoInstallOnAppQuit = true
-autoUpdater.disableDifferentialDownload = false  // 启用差分更新，失败时由 electron-updater 回退完整包
+autoUpdater.disableDifferentialDownload = true  // 禁用差分更新，统一使用全量安装包
 
 // 单例服务
 let dbService: DatabaseService | null = null

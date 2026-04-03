@@ -125,7 +125,6 @@ jobs:
         run: |
           $version = "${{ needs.prepare-meta.outputs.version }}"
           $installer = "release/CipherTalk-$version-Setup.exe"
-          $blockmap = "release/CipherTalk-$version-Setup.exe.blockmap"
           if (-not (Test-Path $installer)) {
             Write-Error "Installer not found: $installer"
             exit 1
@@ -137,10 +136,6 @@ jobs:
           $sizeLines = @(Select-String -Path "release/latest.yml" -Pattern '^\s+size:\s+\d+\s*$')
           if ($sizeLines.Count -ne 1) {
             Write-Error "latest.yml should contain exactly one size entry, found $($sizeLines.Count)"
-            exit 1
-          }
-          if (-not (Test-Path $blockmap)) {
-            Write-Error "blockmap not found: $blockmap"
             exit 1
           }
 
@@ -171,7 +166,6 @@ jobs:
           path: |
             release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.exe
             release/latest.yml
-            release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.exe.blockmap
           if-no-files-found: error
 
   generate-release-body:
@@ -258,7 +252,6 @@ jobs:
         run: |
           $version = "${{ needs.prepare-meta.outputs.version }}"
           $installer = "release/CipherTalk-$version-Setup.exe"
-          $blockmap = "release/CipherTalk-$version-Setup.exe.blockmap"
           if (-not (Test-Path $installer)) {
             Write-Error "Installer not found: $installer"
             exit 1
@@ -278,10 +271,6 @@ jobs:
           }
           if (-not (Test-Path "release/release-body.md")) {
             Write-Error "release-body.md not found"
-            exit 1
-          }
-          if (-not (Test-Path $blockmap)) {
-            Write-Error "blockmap not found: $blockmap"
             exit 1
           }
 
@@ -317,7 +306,6 @@ jobs:
             release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.exe
             release/latest.yml
             release/force-update.json
-            release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.exe.blockmap
 
   mirror-r2:
     runs-on: windows-latest
@@ -366,13 +354,6 @@ jobs:
           $bucket = "s3://$($env:R2_BUCKET_NAME)"
           $version = "${{ needs.prepare-meta.outputs.version }}"
           $currentInstaller = "CipherTalk-$version-Setup.exe"
-          $currentBlockmap = "CipherTalk-$version-Setup.exe.blockmap"
-          $currentBlockmapPath = "release/$currentBlockmap"
-
-          if (-not (Test-Path $currentBlockmapPath)) {
-            Write-Error "blockmap not found: $currentBlockmapPath"
-            exit 1
-          }
 
           $existingInstallers = aws s3 ls $bucket --endpoint-url $endpoint | ForEach-Object {
             $line = $_.ToString().Trim()
@@ -395,15 +376,12 @@ jobs:
           }
 
           foreach ($blockmap in $existingBlockmaps) {
-            if ($blockmap -ne $currentBlockmap) {
-              aws s3 rm "$bucket/$blockmap" --endpoint-url $endpoint
-            }
+            aws s3 rm "$bucket/$blockmap" --endpoint-url $endpoint
           }
 
           aws s3 cp "release/$currentInstaller" "$bucket/$currentInstaller" --endpoint-url $endpoint
           aws s3 cp "release/latest.yml" "$bucket/latest.yml" --endpoint-url $endpoint
           aws s3 cp "release/force-update.json" "$bucket/force-update.json" --endpoint-url $endpoint
-          aws s3 cp $currentBlockmapPath "$bucket/$currentBlockmap" --endpoint-url $endpoint
 
   notify-telegram-success:
     runs-on: windows-latest
