@@ -28,6 +28,7 @@ dist-electron
 # Build output
 out
 release
+.tmp/release-announcement.json
 
 # Database
 *.db
@@ -50,7 +51,7 @@ Docs
 WeFolw
 upx
 native-dlls
-MyCoolInstaller
 resources/whisper
 xkey
 skills
+.claude/

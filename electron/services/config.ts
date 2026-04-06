@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
-import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { getUserDataPath } from './runtimePaths'
 
 interface ConfigSchema {
   // 数据库相关
@@ -30,6 +30,10 @@ interface ConfigSchema {
   themeMode: string
   appIcon: string
   language: string
+  releaseAnnouncementVersion: string
+  releaseAnnouncementBody: string
+  releaseAnnouncementNotes: string
+  releaseAnnouncementSeenVersion: string
 
   // 协议相关
   agreementVersion: number
@@ -77,6 +81,10 @@ interface ConfigSchema {
   aiEnableCache: boolean
   aiEnableThinking: boolean  // 是否显示思考过程
   aiMessageLimit: number     // 摘要提取的消息条数限制
+  mcpEnabled: boolean
+  mcpExposeMediaPaths: boolean
+  mcpProxyPort: number
+  mcpProxyToken: string
 }
 
 const defaults: ConfigSchema = {
@@ -95,6 +103,10 @@ const defaults: ConfigSchema = {
   themeMode: 'light',
   appIcon: 'default',
   language: 'zh-CN',
+  releaseAnnouncementVersion: '',
+  releaseAnnouncementBody: '',
+  releaseAnnouncementNotes: '',
+  releaseAnnouncementSeenVersion: '',
   sttLanguages: ['zh'],
   sttModelType: 'int8',
   sttMode: 'cpu',  // 默认使用 CPU 模式
@@ -120,7 +132,11 @@ const defaults: ConfigSchema = {
   aiCustomSystemPrompt: '',
   aiEnableCache: true,
   aiEnableThinking: true,  // 默认显示思考过程
-  aiMessageLimit: 3000     // 默认3000条，用户可调至5000
+  aiMessageLimit: 3000,    // 默认3000条，用户可调至5000
+  mcpEnabled: false,
+  mcpExposeMediaPaths: true,
+  mcpProxyPort: 5032,
+  mcpProxyToken: ''
 }
 
 export class ConfigService {
@@ -128,7 +144,7 @@ export class ConfigService {
   private dbPath: string
 
   constructor() {
-    const userDataPath = app.getPath('userData')
+    const userDataPath = getUserDataPath()
     this.dbPath = path.join(userDataPath, 'ciphertalk-config.db')
     this.initDatabase()
   }
@@ -389,6 +405,6 @@ export class ConfigService {
     if (configured && configured.trim().length > 0) {
       return configured
     }
-    return path.join(app.getPath('documents'), 'CipherTalk')
+    return path.join(getUserDataPath(), 'CipherTalk')
   }
 }

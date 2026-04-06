@@ -1,25 +1,30 @@
 {
   "name": "ciphertalk",
-  "version": "2.2.14",
+  "version": "3.0.1",
   "description": "密语 - 微信聊天记录查看工具",
   "author": "ILoveBingLu",
   "license": "CC-BY-NC-SA-4.0",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "prebuild": "node scripts/update-readme-version.js",
-    "native:macos": "bash native-dlls/build-macos.sh",
-    "native:macos:check": "node scripts/check-macos-native.js",
-    "build:full": "node scripts/build-full.js",
+    "prebuild": "node scripts/update-readme-version.js && node scripts/prepare-release-announcement.js",
     "build": "tsc && vite build && electron-builder && node scripts/add-size-to-yml.js",
-    "build:pro": "node scripts/build-full.js",
+    "build:ci": "node scripts/prepare-release-announcement.js && tsc && vite build && electron-builder --publish never && node scripts/add-size-to-yml.js",
+    "build:mcp": "tsc && vite build",
+    "build:force-update-manifest": "node scripts/generate-force-update-manifest.js",
+    "build:release-context": "node scripts/generate-release-context.js",
+    "build:release-body": "node scripts/generate-release-body.js",
+    "build:release-announcement": "node scripts/prepare-release-announcement.js",
+    "notify:telegram": "node scripts/send-telegram-release.js",
+    "mcp": "node scripts/mcp-runner.js",
+    "mcp:probe": "node scripts/mcp-probe.js",
     "preview": "vite preview",
     "electron:dev": "vite --mode electron",
     "electron:build": "npm run build",
-    "postinstall": "electron-rebuild",
-    "tuisong": "node scripts/push-release.js"
+    "postinstall": "electron-rebuild"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/material": "^7.3.9",
@@ -56,6 +61,7 @@
     "silk-wasm": "^3.7.1",
     "wechat-emojis": "^1.0.2",
     "xlsx": "^0.18.5",
+    "zod": "^4.1.12",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -85,11 +91,12 @@
       "output": "release"
     },
     "publish": {
-      "provider": "generic",
-      "url": "https://miyuapp.aiqji.com"
+      "provider": "github",
+      "owner": "ILoveBingLu",
+      "repo": "CipherTalk"
     },
     "win": {
-      "icon": "public/xinnian.ico",
+      "icon": "public/icon.ico",
       "target": "nsis",
       "requestedExecutionLevel": "asInvoker"
     },
@@ -113,9 +120,9 @@
       "language": "2052",
       "displayLanguageSelector": false,
       "include": "installer.nsh",
-      "installerIcon": "public/xinnian.ico",
-      "uninstallerIcon": "public/xinnian.ico",
-      "installerHeaderIcon": "public/xinnian.ico",
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "installerHeaderIcon": "public/icon.ico",
       "perMachine": false,
       "allowElevation": true,
       "installerSidebar": null,
@@ -144,6 +151,20 @@
       {
         "from": "public/xinnian.ico",
         "to": "xinnian.ico"
+      },
+      {
+        "from": ".tmp/release-announcement.json",
+        "to": "release-announcement.json"
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "scripts/ciphertalk-mcp.cmd",
+        "to": "ciphertalk-mcp.cmd"
+      },
+      {
+        "from": "scripts/ciphertalk-mcp-bootstrap.cjs",
+        "to": "ciphertalk-mcp-bootstrap.cjs"
       }
     ],
     "files": [

@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { BrowserWindow } from 'electron'
 import { basename, dirname, extname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs'
@@ -10,6 +10,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { ConfigService } from './config'
 import { getDefaultCachePath as getPlatformDefaultCachePath } from './platformService'
+import { getDocumentsPath, getExePath } from './runtimePaths'
 
 const execFileAsync = promisify(execFile)
 
@@ -1526,7 +1527,7 @@ export class ImageDecryptService {
   private getAllCacheRoots(): string[] {
     const roots: string[] = []
     const configured = this.configService.get('cachePath')
-    const documentsPath = app.getPath('documents')
+    const documentsPath = getDocumentsPath()
 
     // 主要路径（当前使用的）
     const mainRoot = this.getCacheRoot()

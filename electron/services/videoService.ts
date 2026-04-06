@@ -4,10 +4,10 @@ import { writeFile } from 'fs/promises'
 import { ConfigService } from './config'
 import { getDefaultCachePath as getPlatformDefaultCachePath } from './platformService'
 import Database from 'better-sqlite3'
-import { app } from 'electron'
 import { Isaac64 } from './isaac64'
 import https from 'https'
 import http from 'http'
+import { getDocumentsPath, getExePath } from './runtimePaths'
 
 export interface VideoInfo {
   videoUrl?: string       // 视频文件路径（用�?readFile�?

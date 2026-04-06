@@ -12,6 +12,13 @@ export interface ImageViewerOpenOptions {
   imageDatName?: string
 }
 
+export interface UpdateDownloadProgressPayload {
+  percent: number
+  transferred: number
+  total: number
+  bytesPerSecond: number
+}
+
 export interface ElectronAPI {
   window: {
     minimize: () => void
@@ -76,12 +83,146 @@ export interface ElectronAPI {
     getDownloadsPath: () => Promise<string>
     getVersion: () => Promise<string>
     getPlatformInfo: () => Promise<{ platform: string; arch: string }>
-    checkForUpdates: () => Promise<{ hasUpdate: boolean; version?: string; releaseNotes?: string }>
+    getMcpLaunchConfig: () => Promise<{
+      command: string
+      args: string[]
+      cwd: string
+      mode: 'dev' | 'packaged'
+    } | null>
+    getUpdateState: () => Promise<{
+      hasUpdate: boolean
+      forceUpdate: boolean
+      currentVersion: string
+      version?: string
+      releaseNotes?: string
+      title?: string
+      message?: string
+      minimumSupportedVersion?: string
+      reason?: 'minimum-version' | 'blocked-version'
+      checkedAt: number
+      updateSource: 'github' | 'custom' | 'none'
+      policySource: 'github' | 'custom' | 'none'
+      diagnostics?: {
+        phase: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'failed'
+        strategy: 'unknown' | 'differential' | 'full'
+        fallbackToFull: boolean
+        lastError?: string
+        lastEvent?: string
+        progressPercent?: number
+        downloadedBytes?: number
+        totalBytes?: number
+        targetVersion?: string
+        lastUpdatedAt: number
+      }
+    } | null>
+    getUpdateSourceInfo: () => Promise<{
+      primaryUpdateSource: 'github'
+      githubRepository: {
+        owner: string
+        repo: string
+      }
+      policySources: Array<'github' | 'custom'>
+      policyPrecedence: 'github'
+      forceUpdatePolicyFallbackUrl: string
+    }>
+    getMcpLaunchConfig: () => Promise<{
+      command: string
+      args: string[]
+      cwd: string
+      mode: 'dev' | 'packaged'
+    } | null>
+    getUpdateState: () => Promise<{
+      hasUpdate: boolean
+      forceUpdate: boolean
+      currentVersion: string
+      version?: string
+      releaseNotes?: string
+      title?: string
+      message?: string
+      minimumSupportedVersion?: string
+      reason?: 'minimum-version' | 'blocked-version'
+      checkedAt: number
+      updateSource: 'github' | 'custom' | 'none'
+      policySource: 'github' | 'custom' | 'none'
+      diagnostics?: {
+        phase: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'failed'
+        strategy: 'unknown' | 'differential' | 'full'
+        fallbackToFull: boolean
+        lastError?: string
+        lastEvent?: string
+        progressPercent?: number
+        downloadedBytes?: number
+        totalBytes?: number
+        targetVersion?: string
+        lastUpdatedAt: number
+      }
+    } | null>
+    getUpdateSourceInfo: () => Promise<{
+      primaryUpdateSource: 'github'
+      githubRepository: {
+        owner: string
+        repo: string
+      }
+      policySources: Array<'github' | 'custom'>
+      policyPrecedence: 'github'
+      forceUpdatePolicyFallbackUrl: string
+    }>
+    checkForUpdates: () => Promise<{
+      hasUpdate: boolean
+      forceUpdate: boolean
+      currentVersion: string
+      version?: string
+      releaseNotes?: string
+      title?: string
+      message?: string
+      minimumSupportedVersion?: string
+      reason?: 'minimum-version' | 'blocked-version'
+      checkedAt: number
+      updateSource: 'github' | 'custom' | 'none'
+      policySource: 'github' | 'custom' | 'none'
+      diagnostics?: {
+        phase: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'failed'
+        strategy: 'unknown' | 'differential' | 'full'
+        fallbackToFull: boolean
+        lastError?: string
+        lastEvent?: string
+        progressPercent?: number
+        downloadedBytes?: number
+        totalBytes?: number
+        targetVersion?: string
+        lastUpdatedAt: number
+      }
+    }>
     downloadAndInstall: () => Promise<void>
     getStartupDbConnected?: () => Promise<boolean>
     setAppIcon: (iconName: string) => Promise<void>
-    onDownloadProgress: (callback: (progress: number) => void) => () => void
-    onUpdateAvailable: (callback: (info: { version: string; releaseNotes: string }) => void) => () => void
+    onDownloadProgress: (callback: (progress: UpdateDownloadProgressPayload) => void) => () => void
+    onUpdateAvailable: (callback: (info: {
+      hasUpdate: boolean
+      forceUpdate: boolean
+      currentVersion: string
+      version?: string
+      releaseNotes?: string
+      title?: string
+      message?: string
+      minimumSupportedVersion?: string
+      reason?: 'minimum-version' | 'blocked-version'
+      checkedAt: number
+      updateSource: 'github' | 'custom' | 'none'
+      policySource: 'github' | 'custom' | 'none'
+      diagnostics?: {
+        phase: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'failed'
+        strategy: 'unknown' | 'differential' | 'full'
+        fallbackToFull: boolean
+        lastError?: string
+        lastEvent?: string
+        progressPercent?: number
+        downloadedBytes?: number
+        totalBytes?: number
+        targetVersion?: string
+        lastUpdatedAt: number
+      }
+    }) => void) => () => void
   }
   httpApi: {
     getStatus: () => Promise<{

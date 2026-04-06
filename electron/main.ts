@@ -1,8 +1,10 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, protocol, net, Tray, Menu } from 'electron'
 import { join } from 'path'
+import { randomBytes } from 'crypto'
 import { readFileSync, existsSync, mkdirSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
 import { DatabaseService } from './services/database'
+import { appUpdateService } from './services/appUpdateService'
 
 import { wechatDecryptService } from './services/decryptService'
 import { ConfigService } from './services/config'
@@ -28,6 +30,8 @@ import { windowsHelloService, WindowsHelloResult } from './services/windowsHello
 import { shortcutService } from './services/shortcutService'
 import { httpApiService } from './services/httpApiService'
 import { getBestCachePath, getRuntimePlatformInfo } from './services/platformService'
+import { getMcpLaunchConfig as getMcpLaunchConfigForUi, getMcpProxyConfig } from './services/mcp/runtime'
+import { mcpProxyService } from './services/mcp/proxyService'
 
 // 扩展 app 对象类型，添加 isQuitting 标志
 declare module 'electron' {
@@ -60,30 +64,7 @@ protocol.registerSchemesAsPrivileged([
 // 配置自动更新
 autoUpdater.autoDownload = false
 autoUpdater.autoInstallOnAppQuit = true
-autoUpdater.disableDifferentialDownload = true  // 禁用差分更新，强制全量下载
-
-/**
- * 比较两个语义化版本号
- * @param version1 版本1
- * @param version2 版本2
- * @returns version1 > version2 返回 true
- */
-function isNewerVersion(version1: string, version2: string): boolean {
-  const v1Parts = version1.split('.').map(Number)
-  const v2Parts = version2.split('.').map(Number)
-
-  // 补齐版本号位数
-  const maxLength = Math.max(v1Parts.length, v2Parts.length)
-  while (v1Parts.length < maxLength) v1Parts.push(0)
-  while (v2Parts.length < maxLength) v2Parts.push(0)
-
-  for (let i = 0; i < maxLength; i++) {
-    if (v1Parts[i] > v2Parts[i]) return true
-    if (v1Parts[i] < v2Parts[i]) return false
-  }
-
-  return false // 版本相同
-}
+autoUpdater.disableDifferentialDownload = true  // 禁用差分更新，统一使用全量安装包
 
 // 单例服务
 let dbService: DatabaseService | null = null
@@ -93,6 +74,7 @@ let logService: LogService | null = null
 
 // 系统托盘实例
 let tray: Tray | null = null
+let isInstallingUpdate = false
 
 // 聊天窗口实例
 let chatWindow: BrowserWindow | null = null
@@ -112,6 +94,65 @@ let aiSummaryWindow: BrowserWindow | null = null
 let welcomeWindow: BrowserWindow | null = null
 // 聊天记录窗口实例
 let chatHistoryWindow: BrowserWindow | null = null
+const allowDevTools = !!process.env.VITE_DEV_SERVER_URL
+
+type ReleaseAnnouncementPayload = {
+  version: string
+  releaseBody?: string
+  releaseNotes?: string
+  generatedAt?: string
+}
+
+function getReleaseAnnouncementPath(): string {
+  const isDev = !!process.env.VITE_DEV_SERVER_URL
+  return isDev
+    ? join(__dirname, '../.tmp/release-announcement.json')
+    : join(process.resourcesPath, 'release-announcement.json')
+}
+
+function syncPackagedReleaseAnnouncement() {
+  if (!configService) return
+
+  const announcementPath = getReleaseAnnouncementPath()
+  if (!existsSync(announcementPath)) {
+    return
+  }
+
+  try {
+    const raw = readFileSync(announcementPath, 'utf8')
+    const payload = JSON.parse(raw) as ReleaseAnnouncementPayload
+    if (!payload || typeof payload !== 'object') return
+
+    const version = String(payload.version || '').trim()
+    if (!version || version !== app.getVersion()) return
+
+    const releaseBody = String(payload.releaseBody || '').trim()
+    const releaseNotes = String(payload.releaseNotes || '').trim()
+
+    const storedVersion = configService.get('releaseAnnouncementVersion')
+    const storedBody = configService.get('releaseAnnouncementBody')
+    const storedNotes = configService.get('releaseAnnouncementNotes')
+
+    if (
+      storedVersion === version &&
+      storedBody === releaseBody &&
+      storedNotes === releaseNotes
+    ) {
+      return
+    }
+
+    configService.set('releaseAnnouncementVersion', version)
+    configService.set('releaseAnnouncementBody', releaseBody)
+    configService.set('releaseAnnouncementNotes', releaseNotes)
+    logService?.info('ReleaseAnnouncement', '已同步本地版本公告', {
+      version,
+      hasBody: Boolean(releaseBody),
+      hasNotes: Boolean(releaseNotes)
+    })
+  } catch (error) {
+    logService?.warn('ReleaseAnnouncement', '同步本地版本公告失败', { error: String(error) })
+  }
+}
 
 /**
  * 获取当前主题的 URL 查询参数
@@ -203,6 +244,7 @@ function createWindow() {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -221,6 +263,26 @@ function createWindow() {
   dbService = new DatabaseService()
 
   logService = new LogService(configService)
+  syncPackagedReleaseAnnouncement()
+  mcpProxyService.setLogger(logService)
+  autoUpdater.logger = {
+    info(message: string) {
+      logService?.info('AppUpdate', message)
+      appUpdateService.noteUpdaterMessage(String(message), 'info')
+    },
+    warn(message: string) {
+      logService?.warn('AppUpdate', message)
+      appUpdateService.noteUpdaterMessage(String(message), 'warn')
+    },
+    error(message: string) {
+      logService?.error('AppUpdate', message)
+      appUpdateService.noteUpdaterMessage(String(message), 'error')
+    },
+    debug(message: string) {
+      logService?.debug('AppUpdate', message)
+      appUpdateService.noteUpdaterMessage(String(message), 'info')
+    }
+  }
 
   // 记录应用启动日志
   logService.info('App', '应用启动', { version: app.getVersion() })
@@ -238,6 +300,17 @@ function createWindow() {
 
   // 监听窗口关闭事件
   win.on('close', (event) => {
+    const updateInfo = appUpdateService.getCachedUpdateInfo()
+    if (updateInfo?.forceUpdate) {
+      app.isQuitting = true
+      return
+    }
+
+    if (isInstallingUpdate) {
+      app.isQuitting = true
+      return
+    }
+
     // 如果是真正退出应用，不阻止
     if (app.isQuitting) {
       return
@@ -314,6 +387,7 @@ function createChatWindow() {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -388,6 +462,7 @@ function createGroupAnalyticsWindow() {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -465,6 +540,7 @@ function createMomentsWindow(filterUsername?: string) {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -553,6 +629,7 @@ function createChatHistoryWindow(sessionId: string, messageId: number) {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -618,6 +695,7 @@ function createAnnualReportWindow(year: number) {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -689,6 +767,7 @@ function createAgreementWindow() {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -750,6 +829,7 @@ function createWelcomeWindow() {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -793,6 +873,7 @@ function createPurchaseWindow() {
     minHeight: 600,
     icon: iconPath,
     webPreferences: {
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -838,6 +919,7 @@ function createImageViewerWindow(
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false // 允许加载本地文件
@@ -946,6 +1028,7 @@ function createVideoPlayerWindow(videoPath: string, videoWidth?: number, videoHe
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false
@@ -1008,6 +1091,7 @@ function createBrowserWindow(url: string, title?: string) {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false,
@@ -1082,6 +1166,7 @@ function createAISummaryWindow(sessionId: string, sessionName: string) {
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -1291,26 +1376,31 @@ function registerIpcHandlers() {
     return getRuntimePlatformInfo()
   })
 
-  ipcMain.handle('app:checkForUpdates', async () => {
-    try {
-      const result = await autoUpdater.checkForUpdates()
-      if (result && result.updateInfo) {
-        const currentVersion = app.getVersion()
-        const latestVersion = result.updateInfo.version
+  ipcMain.handle('app:getMcpLaunchConfig', async () => {
+    return getMcpLaunchConfigForUi()
+  })
 
-        // 使用语义化版本比较
-        if (isNewerVersion(latestVersion, currentVersion)) {
-          return {
-            hasUpdate: true,
-            version: latestVersion,
-            releaseNotes: result.updateInfo.releaseNotes as string || ''
-          }
-        }
-      }
-      return { hasUpdate: false }
-    } catch (error) {
-      console.error('检查更新失败:', error)
-      return { hasUpdate: false }
+  ipcMain.on('app:getMcpLaunchConfig:request', (event, payload: { requestId?: string } | undefined) => {
+    const requestId = payload?.requestId
+    if (!requestId) return
+    event.sender.send(`app:getMcpLaunchConfig:response:${requestId}`, getMcpLaunchConfigForUi())
+  })
+
+  ipcMain.handle('app:checkForUpdates', async () => {
+    return appUpdateService.checkForUpdates()
+  })
+
+  ipcMain.handle('app:getUpdateState', async () => {
+    return appUpdateService.getCachedUpdateInfo()
+  })
+
+  ipcMain.handle('app:getUpdateSourceInfo', async () => {
+    return {
+      primaryUpdateSource: 'github' as const,
+      githubRepository: appUpdateService.getGithubRepository(),
+      policySources: ['github', 'custom'] as const,
+      policyPrecedence: 'github' as const,
+      forceUpdatePolicyFallbackUrl: appUpdateService.getForceUpdatePolicyFallbackUrl()
     }
   })
 
@@ -1342,21 +1432,93 @@ function registerIpcHandlers() {
   ipcMain.handle('app:downloadAndInstall', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
 
-    // 监听下载进度
-    autoUpdater.on('download-progress', (progress) => {
-      win?.webContents.send('app:downloadProgress', progress.percent)
-    })
+    if (isInstallingUpdate) {
+      logService?.warn('AppUpdate', '下载更新请求被忽略，当前已有下载任务进行中', {
+        targetVersion: appUpdateService.getCachedUpdateInfo()?.version
+      })
+      return
+    }
 
-    // 下载完成后自动安装
-    autoUpdater.on('update-downloaded', () => {
-      autoUpdater.quitAndInstall(false, true)
+    isInstallingUpdate = true
+    const cachedUpdateInfo = appUpdateService.getCachedUpdateInfo()
+    const targetVersion = cachedUpdateInfo?.version
+
+    appUpdateService.updateDiagnostics({
+      phase: 'downloading',
+      targetVersion,
+      lastError: undefined,
+      progressPercent: 0,
+      downloadedBytes: 0,
+      totalBytes: undefined,
+      lastEvent: targetVersion ? `开始下载更新 ${targetVersion}` : '开始下载更新'
     })
+    logService?.info('AppUpdate', '开始下载更新', { targetVersion, differentialEnabled: !autoUpdater.disableDifferentialDownload })
+
+    const onDownloadProgress = (progress: Electron.ProgressInfo) => {
+      const payload = {
+        percent: progress.percent,
+        transferred: progress.transferred,
+        total: progress.total,
+        bytesPerSecond: progress.bytesPerSecond
+      }
+      BrowserWindow.getAllWindows().forEach(currentWindow => {
+        currentWindow.webContents.send('app:downloadProgress', payload)
+      })
+      appUpdateService.updateDiagnostics({
+        phase: 'downloading',
+        progressPercent: progress.percent,
+        downloadedBytes: progress.transferred,
+        totalBytes: progress.total,
+        lastEvent: `下载中 ${progress.percent.toFixed(1)}%`
+      })
+    }
+
+    const onUpdateDownloaded = () => {
+      appUpdateService.updateDiagnostics({
+        phase: 'downloaded',
+        progressPercent: 100,
+        lastEvent: '更新包下载完成，准备安装'
+      })
+      logService?.info('AppUpdate', '更新包下载完成，准备安装', {
+        targetVersion,
+        fallbackToFull: appUpdateService.getCachedUpdateInfo()?.diagnostics?.fallbackToFull || false
+      })
+      app.isQuitting = true
+      appUpdateService.updateDiagnostics({
+        phase: 'installing',
+        lastEvent: '开始调用安装器'
+      })
+      autoUpdater.quitAndInstall(false, true)
+    }
+
+    const onUpdaterError = (error: Error) => {
+      isInstallingUpdate = false
+      appUpdateService.updateDiagnostics({
+        phase: 'failed',
+        lastError: String(error),
+        lastEvent: '下载或安装更新失败'
+      })
+      logService?.error('AppUpdate', '下载或安装更新失败', {
+        targetVersion,
+        error: String(error),
+        fallbackToFull: appUpdateService.getCachedUpdateInfo()?.diagnostics?.fallbackToFull || false
+      })
+    }
+
+    autoUpdater.on('download-progress', onDownloadProgress)
+    autoUpdater.once('update-downloaded', onUpdateDownloaded)
+    autoUpdater.once('error', onUpdaterError)
 
     try {
       await autoUpdater.downloadUpdate()
     } catch (error) {
-      console.error('下载更新失败:', error)
+      isInstallingUpdate = false
+      onUpdaterError(error as Error)
       throw error
+    } finally {
+      autoUpdater.removeListener('download-progress', onDownloadProgress)
+      autoUpdater.removeListener('update-downloaded', onUpdateDownloaded)
+      autoUpdater.removeListener('error', onUpdaterError)
     }
   })
 
@@ -3601,6 +3763,7 @@ function createSplashWindow(): BrowserWindow {
     show: true, // 直接显示窗口
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      devTools: allowDevTools,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false  // 允许加载本地文件
@@ -3767,21 +3930,18 @@ function checkForUpdatesOnStartup() {
   // 延迟3秒检测，等待窗口完全加载
   setTimeout(async () => {
     try {
-      const result = await autoUpdater.checkForUpdates()
-      if (result && result.updateInfo) {
-        const currentVersion = app.getVersion()
-        const latestVersion = result.updateInfo.version
-
-        // 使用语义化版本比较
-        if (isNewerVersion(latestVersion, currentVersion) && mainWindow) {
-          // 通知渲染进程有新版本
-          mainWindow.webContents.send('app:updateAvailable', {
-            version: latestVersion,
-            releaseNotes: result.updateInfo.releaseNotes || ''
-          })
-        }
+      const result = await appUpdateService.checkForUpdates()
+      logService?.info('AppUpdate', '启动时检查更新完成', {
+        hasUpdate: result.hasUpdate,
+        currentVersion: result.currentVersion,
+        version: result.version,
+        diagnostics: result.diagnostics
+      })
+      if (result.hasUpdate && mainWindow) {
+        mainWindow.webContents.send('app:updateAvailable', result)
       }
     } catch (error) {
+      logService?.error('AppUpdate', '启动时检查更新失败', { error: String(error) })
       console.error('启动时检查更新失败:', error)
     }
   }, 3000)
@@ -3799,6 +3959,14 @@ app.on('certificate-error', (event, webContents, url, error, certificate, callba
 })
 
 app.whenReady().then(async () => {
+  if (!configService) {
+    configService = new ConfigService()
+  }
+
+  if (!configService.get('mcpProxyToken')) {
+    configService.set('mcpProxyToken', randomBytes(24).toString('hex'))
+  }
+
   // 注册自定义协议用于加载本地视频
   protocol.handle('local-video', (request) => {
     // 移除协议前缀并解码
@@ -3892,6 +4060,18 @@ app.whenReady().then(async () => {
     console.error('[HttpApi] 启动失败:', httpApiStartResult.error)
   }
 
+  const mcpProxyConfig = getMcpProxyConfig(configService)
+  mcpProxyService.applySettings({
+    host: mcpProxyConfig.host,
+    port: mcpProxyConfig.port,
+    token: mcpProxyConfig.token
+  })
+  const mcpProxyStartResult = await mcpProxyService.start()
+  if (!mcpProxyStartResult.success) {
+    console.error('[McpProxy] 启动失败:', mcpProxyStartResult.error)
+    logService?.error('McpProxy', '内部 MCP 代理启动失败', { error: mcpProxyStartResult.error })
+  }
+
   // 只有在配置完整时才创建主窗口
   // 如果配置不完整，checkAndConnectOnStartup 会创建引导窗口
   if (shouldShowSplash !== false || configService?.get('myWxid')) {
@@ -3932,6 +4112,9 @@ app.on('before-quit', () => {
   
   httpApiService.stop().catch((e) => {
     console.error('[HttpApi] 停止失败:', e)
+  })
+  mcpProxyService.stop().catch((e) => {
+    console.error('[McpProxy] 停止失败:', e)
   })
   // 关闭配置数据库连接
   configService?.close()
