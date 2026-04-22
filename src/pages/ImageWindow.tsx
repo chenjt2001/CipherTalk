@@ -1,9 +1,24 @@
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ZoomIn, ZoomOut, RotateCw, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react'
 import { LivePhotoIcon } from '../components/LivePhotoIcon'
+import type { ImageListItem } from '../types/electron'
 import './ImageWindow.scss'
+
+type ViewportMeta = {
+    scale: number
+    initialScale: number
+    naturalSize: { width: number; height: number }
+    viewportSize: { width: number; height: number }
+}
+
+function isImagePannable({ scale, initialScale, naturalSize, viewportSize }: ViewportMeta): boolean {
+    const displayScale = initialScale * scale
+    return viewportSize.width > 0 &&
+        (naturalSize.width * displayScale > viewportSize.width + 1 ||
+            naturalSize.height * displayScale > viewportSize.height + 1)
+}
 
 export default function ImageWindow() {
     const [searchParams] = useSearchParams()
@@ -14,7 +29,7 @@ export default function ImageWindow() {
     const imageDatName = searchParams.get('imageDatName') || undefined
 
     // 图片列表导航状态
-    const [imageList, setImageList] = useState<Array<{ imagePath: string; liveVideoPath?: string }>>([])
+    const [imageList, setImageList] = useState<ImageListItem[]>([])
     const [currentIndex, setCurrentIndex] = useState(0)
 
     const activeImage = imageList.length > 0 ? imageList[currentIndex] : null
@@ -24,6 +39,7 @@ export default function ImageWindow() {
     const [hdImagePath, setHdImagePath] = useState<string | null>(null)
     const [hdLiveVideoPath, setHdLiveVideoPath] = useState<string | undefined>(undefined)
     const upgradeTriedRef = useRef<string | null>(null)
+    const suppressGestureUntilRef = useRef(0)
     const effectiveImagePath = hdImagePath || currentImagePath
     const effectiveLiveVideoPath = hdLiveVideoPath ?? currentLiveVideoPath
 
@@ -39,12 +55,11 @@ export default function ImageWindow() {
     // 使用 ref 存储拖动状态，避免闭包问题
     const dragStateRef = useRef({
         isDragging: false,
+        pointerId: -1,
         startX: 0,
         startY: 0,
         startPosX: 0,
-        startPosY: 0,
-        lastScreenX: 0,
-        lastScreenY: 0
+        startPosY: 0
     })
 
     const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 })
@@ -54,6 +69,15 @@ export default function ImageWindow() {
         setHdImagePath(null)
         setHdLiveVideoPath(undefined)
         upgradeTriedRef.current = null
+    }, [currentImagePath])
+
+    useLayoutEffect(() => {
+        suppressGestureUntilRef.current = Date.now() + 400
+        setScale(1)
+        setRotation(0)
+        setPosition({ x: 0, y: 0 })
+        setIsPlayingLive(false)
+        setIsVideoVisible(false)
     }, [currentImagePath])
 
     // 在图片查看器中再次尝试强制升级高清图
@@ -129,7 +153,7 @@ export default function ImageWindow() {
         }, 300)
     }, [])
 
-    // 监听主进程发送的图片列表
+    // 监听主进程发送的图片更新
     useEffect(() => {
         const cleanup = window.electronAPI?.window?.onImageListUpdate?.((data) => {
             setImageList(data.imageList)
@@ -169,8 +193,15 @@ export default function ImageWindow() {
         }
 
         updateViewportSize()
+        const resizeObserver = new ResizeObserver(() => {
+            updateViewportSize()
+        })
+        resizeObserver.observe(viewportRef.current)
         window.addEventListener('resize', updateViewportSize)
-        return () => window.removeEventListener('resize', updateViewportSize)
+        return () => {
+            resizeObserver.disconnect()
+            window.removeEventListener('resize', updateViewportSize)
+        }
     }, [])
 
     // 监听视口大小和图片原始尺寸变化，自动调整初始缩放比例
@@ -207,7 +238,7 @@ export default function ImageWindow() {
         // 重置缩放和位置
         setScale(1)
         setPosition({ x: 0, y: 0 })
-    }, [imageList.length])
+    }, [effectiveImagePath, imageList.length])
 
     // Use a ref to access latest state in event listeners without re-binding
     const metaRef = useRef({
@@ -221,98 +252,85 @@ export default function ImageWindow() {
         metaRef.current = { scale, initialScale, naturalSize, viewportSize }
     }, [scale, initialScale, naturalSize, viewportSize])
 
-    // 使用原生事件监听器处理拖动
-    // 使用原生事件监听器处理拖动
-    useEffect(() => {
-        const handleMouseMove = (e: MouseEvent) => {
-            if (!dragStateRef.current.isDragging) return
+    const clampDragPosition = useCallback((clientX: number, clientY: number) => {
+        const { scale, initialScale, naturalSize, viewportSize } = metaRef.current
+        const displayScale = initialScale * scale
 
-            // Get latest values from ref
-            const { scale, initialScale, naturalSize, viewportSize } = metaRef.current
-            const displayScale = initialScale * scale
+        const dx = clientX - dragStateRef.current.startX
+        const dy = clientY - dragStateRef.current.startY
 
-            const isPannable = viewportSize.width > 0 &&
-                (naturalSize.width * displayScale > viewportSize.width + 1 ||
-                    naturalSize.height * displayScale > viewportSize.height + 1)
+        let newX = dragStateRef.current.startPosX + dx
+        let newY = dragStateRef.current.startPosY + dy
 
-            if (isPannable) {
-                const dx = e.clientX - dragStateRef.current.startX
-                const dy = e.clientY - dragStateRef.current.startY
+        const dw = naturalSize.width * displayScale
+        const dh = naturalSize.height * displayScale
 
-                let newX = dragStateRef.current.startPosX + dx
-                let newY = dragStateRef.current.startPosY + dy
-
-                // 计算边界限制
-                const dw = naturalSize.width * displayScale
-                const dh = naturalSize.height * displayScale
-
-                // X轴限制
-                if (dw > viewportSize.width) {
-                    const limitX = (dw - viewportSize.width) / 2
-                    newX = Math.max(-limitX, Math.min(newX, limitX))
-                } else {
-                    newX = 0
-                }
-
-                // Y轴限制
-                if (dh > viewportSize.height) {
-                    const limitY = (dh - viewportSize.height) / 2
-                    newY = Math.max(-limitY, Math.min(newY, limitY))
-                } else {
-                    newY = 0
-                }
-
-                setPosition({ x: newX, y: newY })
-            }
-            // 不可平移时不做任何操作，窗口拖动由标题栏处理
+        if (dw > viewportSize.width) {
+            const limitX = (dw - viewportSize.width) / 2
+            newX = Math.max(-limitX, Math.min(newX, limitX))
+        } else {
+            newX = 0
         }
 
-        const handleMouseUp = () => {
-            dragStateRef.current.isDragging = false
-
-            // Restore cursor depending on isPannable
-            const { scale, initialScale, naturalSize, viewportSize } = metaRef.current
-            const displayScale = initialScale * scale
-            const isPannable = viewportSize.width > 0 &&
-                (naturalSize.width * displayScale > viewportSize.width + 1 ||
-                    naturalSize.height * displayScale > viewportSize.height + 1)
-
-            document.body.style.cursor = isPannable ? 'grab' : 'default'
+        if (dh > viewportSize.height) {
+            const limitY = (dh - viewportSize.height) / 2
+            newY = Math.max(-limitY, Math.min(newY, limitY))
+        } else {
+            newY = 0
         }
 
-        document.addEventListener('mousemove', handleMouseMove)
-        document.addEventListener('mouseup', handleMouseUp)
-
-        return () => {
-            document.removeEventListener('mousemove', handleMouseMove)
-            document.removeEventListener('mouseup', handleMouseUp)
-        }
+        setPosition({ x: newX, y: newY })
     }, [])
 
-    const handleMouseDown = (e: React.MouseEvent) => {
+    const stopDragging = useCallback(() => {
+        dragStateRef.current.isDragging = false
+        dragStateRef.current.pointerId = -1
+        document.body.style.cursor = isImagePannable(metaRef.current) ? 'grab' : 'default'
+    }, [])
+
+    const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
         if (e.button !== 0) return
         e.preventDefault()
 
-        const { scale, initialScale, naturalSize, viewportSize } = metaRef.current
-        const displayScale = initialScale * scale
-        const isPannable = viewportSize.width > 0 &&
-            (naturalSize.width * displayScale > viewportSize.width + 1 ||
-                naturalSize.height * displayScale > viewportSize.height + 1)
+        const isPannable = isImagePannable(metaRef.current)
+        if (!isPannable) return
 
         dragStateRef.current = {
             isDragging: true,
+            pointerId: e.pointerId,
             startX: e.clientX,
             startY: e.clientY,
             startPosX: position.x,
-            startPosY: position.y,
-            lastScreenX: e.screenX,
-            lastScreenY: e.screenY
+            startPosY: position.y
         }
-        document.body.style.cursor = isPannable ? 'grabbing' : 'default'
-    }
+        e.currentTarget.setPointerCapture(e.pointerId)
+        document.body.style.cursor = 'grabbing'
+    }, [position.x, position.y])
+
+    const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (!dragStateRef.current.isDragging) return
+        if (dragStateRef.current.pointerId !== e.pointerId) return
+
+        clampDragPosition(e.clientX, e.clientY)
+    }, [clampDragPosition])
+
+    const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (dragStateRef.current.pointerId === e.pointerId && e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId)
+        }
+        stopDragging()
+    }, [stopDragging])
+
+    const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (dragStateRef.current.pointerId === e.pointerId && e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId)
+        }
+        stopDragging()
+    }, [stopDragging])
 
     const handleWheel = useCallback((e: React.WheelEvent) => {
         if (!viewportRef.current) return
+        if (Date.now() < suppressGestureUntilRef.current) return
         // 阻止默认滚动行为，避免触发页面滚动（虽然 overflows hidden 但保险起见）
 
         const ZOOM_SPEED = 0.15
@@ -355,6 +373,7 @@ export default function ImageWindow() {
     // 双击重置
     // 双击：如果当前是适应屏幕 (scale ~ 1)，则放大到 100% (1:1) 并以鼠标为中心；否则重置
     const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+        if (Date.now() < suppressGestureUntilRef.current) return
         if (Math.abs(scale - 1) < 0.05) {
             // 当前是适应状态 -> 放大到 1:1
             // 1:1 意味着 displayScale = 1.0
@@ -424,9 +443,7 @@ export default function ImageWindow() {
     const displayScale = initialScale * scale
 
     // 判断是否可拖拽平移：只有当显示尺寸大于视口尺寸时才允许平移，否则允许拖拽窗口
-    const isPannable = viewportSize.width > 0 &&
-        (naturalSize.width * displayScale > viewportSize.width + 1 ||
-            naturalSize.height * displayScale > viewportSize.height + 1)
+    const isPannable = isImagePannable({ scale, initialScale, naturalSize, viewportSize })
     // height 判定宽松一点或者严格一点？这里用 height 简单判定。
     // 注意：如果旋转了，宽高判断会变。暂不处理旋转后的复杂bbox calculations。
 
@@ -469,10 +486,13 @@ export default function ImageWindow() {
                 ref={viewportRef}
                 onWheel={handleWheel}
                 onDoubleClick={handleDoubleClick}
-                onMouseDown={handleMouseDown}
             >
                 <div
-                    className="media-wrapper"
+                    className={`media-wrapper ${isPannable ? 'pannable' : ''}`}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerCancel}
                     style={{
                         transform: `translate(${position.x}px, ${position.y}px) scale(${displayScale}) rotate(${rotation}deg)`
                     }}
@@ -480,7 +500,6 @@ export default function ImageWindow() {
                     <img
                         src={effectiveImagePath}
                         alt="Preview"
-                        className={isPannable ? 'pannable' : ''}
                         onLoad={handleImageLoad}
                         draggable={false}
                     />

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Loader2, RefreshCw, Search, Calendar, User, X, Filter, AlertTriangle, Play, Download, Heart, Copy, Link, Music, FileDown, ArrowUp, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Loader2, RefreshCw, Search, Calendar, User, X, Filter, AlertTriangle, Play, Download, Heart, Copy, Link, Music, FileDown, ArrowUp, ChevronLeft, ChevronRight, Newspaper } from 'lucide-react'
 import { ImagePreview } from '../components/ImagePreview'
 import { LivePhotoIcon } from '../components/LivePhotoIcon'
 import { parseWechatEmoji, parseWechatEmojiHtml } from '../utils/wechatEmoji'
@@ -17,6 +17,44 @@ export interface SnsShareInfo {
   thumbToken?: string
   appName?: string
   type?: number
+}
+
+const isMusicShare = (shareInfo: SnsShareInfo) => shareInfo.type === 3 && (shareInfo.appName?.includes('音乐') || false)
+
+const getShareHost = (url?: string) => {
+  if (!url) return ''
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+const buildShareThumbUrl = (url?: string, token?: string) => {
+  if (!url) return ''
+
+  let normalizedUrl = url.replace(/&amp;/g, '&').replace('http://', 'https://')
+  if (normalizedUrl.includes('token=')) {
+    return normalizedUrl
+  }
+
+  if (token?.trim()) {
+    const connector = normalizedUrl.includes('?') ? '&' : '?'
+    normalizedUrl = `${normalizedUrl}${connector}token=${token}&idx=1`
+  }
+
+  return normalizedUrl
+}
+
+const toFileSrc = (localPath: string) => {
+  const normalizedPath = localPath.replace(/\\/g, '/').replace(/^\/+/, '')
+  return encodeURI(`file:///${normalizedPath}`)
+}
+
+const getShareBadge = (shareInfo: SnsShareInfo) => {
+  if (isMusicShare(shareInfo)) return '音乐'
+  if (shareInfo.contentUrl.includes('mp.weixin.qq.com')) return '公众号文章'
+  return '网页链接'
 }
 
 interface SnsPost {
@@ -491,6 +529,8 @@ const MediaItem = ({ media, isSingle, allMedia, onPreview, onMediaDeleted }: { m
 const ShareThumb = ({ shareInfo }: { shareInfo: SnsShareInfo }) => {
   const [imgSrc, setImgSrc] = useState<string>('')
   const [failed, setFailed] = useState(false)
+  const currentUrl = buildShareThumbUrl(shareInfo.thumbUrl, shareInfo.thumbToken)
+  const isMusic = isMusicShare(shareInfo)
 
   useEffect(() => {
     if (!shareInfo.thumbUrl) {
@@ -499,20 +539,24 @@ const ShareThumb = ({ shareInfo }: { shareInfo: SnsShareInfo }) => {
     }
     let cancelled = false
     setFailed(false)
-    let currentUrl = shareInfo.thumbUrl
-    // 微信图片常以 http 开头，如果本地也是 http 可能没问题，但在生产环境可能会被 mixed content 拦截
-    if (currentUrl.startsWith('http://')) {
-      currentUrl = currentUrl.replace('http://', 'https://')
+
+    if (isMusic) {
+      setImgSrc(currentUrl)
+      return () => { cancelled = true }
     }
+
+    const effectiveThumbKey = shareInfo.thumbKey?.trim() && shareInfo.thumbKey.trim() !== '0'
+      ? shareInfo.thumbKey
+      : undefined
 
     window.electronAPI.sns.proxyImage({
       url: currentUrl,
-      key: shareInfo.thumbKey
+      key: effectiveThumbKey
     }).then((res: any) => {
       if (cancelled) return
       if (res.success) {
         const src = res.localPath
-          ? `file://${res.localPath.replace(/\\/g, '/')}`
+          ? toFileSrc(res.localPath)
           : res.dataUrl || currentUrl
         setImgSrc(src)
       } else {
@@ -523,9 +567,7 @@ const ShareThumb = ({ shareInfo }: { shareInfo: SnsShareInfo }) => {
       if (!cancelled) setImgSrc(currentUrl)
     })
     return () => { cancelled = true }
-  }, [shareInfo.thumbUrl, shareInfo.thumbKey])
-
-  const isMusic = shareInfo.type === 3 && shareInfo.appName?.includes('音乐') || false
+  }, [shareInfo.thumbUrl, shareInfo.thumbKey, shareInfo.thumbToken, currentUrl, isMusic])
 
   if (failed) {
     return (
@@ -537,6 +579,10 @@ const ShareThumb = ({ shareInfo }: { shareInfo: SnsShareInfo }) => {
 
   // 二次加载失败的回调处理
   const handleImageError = () => {
+    if (imgSrc.startsWith('file:///')) {
+      setImgSrc(currentUrl)
+      return
+    }
     if (imgSrc.startsWith('https://')) {
       // 如果 https 失败，也许原图 http 也能通（虽然可能是防盗链）
       setImgSrc(imgSrc.replace('https://', 'http://'))
@@ -1783,7 +1829,7 @@ document.querySelectorAll('.vi video').forEach(function(v) {
                         </div>
                       ) : post.shareInfo ? (
                         <div
-                          className="post-share-card"
+                          className={`post-share-card ${isMusicShare(post.shareInfo) ? 'is-music' : ''}`}
                           onClick={() => {
                             if (post.shareInfo?.contentUrl) {
                               window.electronAPI.shell.openExternal(post.shareInfo.contentUrl);
@@ -1798,9 +1844,18 @@ document.querySelectorAll('.vi video').forEach(function(v) {
                             {post.shareInfo.description && (
                               <div className="share-desc">{post.shareInfo.description}</div>
                             )}
-                            {post.shareInfo.appName && (
-                              <div className="share-app-name">{post.shareInfo.appName}</div>
-                            )}
+                            <div className="share-footer">
+                              <span className="share-type-badge">
+                                {isMusicShare(post.shareInfo) ? <Music size={11} /> : <Newspaper size={11} />}
+                                <span>{getShareBadge(post.shareInfo)}</span>
+                              </span>
+                              {post.shareInfo.appName && (
+                                <span className="share-source-name">{post.shareInfo.appName}</span>
+                              )}
+                              {!isMusicShare(post.shareInfo) && (
+                                <span className="share-link-host">{getShareHost(post.shareInfo.contentUrl) || '查看原文'}</span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       ) : null}

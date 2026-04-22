@@ -248,7 +248,7 @@ const extractShareInfo = (xml: string): SnsShareInfo | undefined => {
             thumbUrl = unescapeXml(thumbMatch[2]);
             const keyM = thumbMatch[1].match(/key="([^"]+)"/i);
             const tokM = thumbMatch[1].match(/token="([^"]+)"/i);
-            if (keyM) thumbKey = keyM[1];
+            if (keyM && keyM[1].trim() !== '0') thumbKey = keyM[1];
             if (tokM) thumbToken = tokM[1];
         } else {
             // 3. cover_pic_image_url
@@ -1630,9 +1630,9 @@ class SnsService {
                                 const raw = encryptedBuffer
 
                                 // 视频只解密前128KB
-                                if (key && String(key).trim().length > 0) {
+                                const keyText = key === undefined || key === null ? '' : String(key).trim()
+                                if (keyText.length > 0 && keyText !== '0') {
                                     try {
-                                        const keyText = String(key).trim()
                                         let keystream: Buffer
 
                                         try {
@@ -1735,10 +1735,11 @@ class SnsService {
                         let decoded = raw
 
                         // 图片逻辑
-                        const shouldDecrypt = (xEnc === '1' || !!key) && key !== undefined && key !== null && String(key).trim().length > 0
+                        const keyText = key === undefined || key === null ? '' : String(key).trim()
+                        const shouldDecrypt = (xEnc === '1' || !!key) && keyText.length > 0 && keyText !== '0'
                         if (shouldDecrypt) {
                             try {
-                                const keyStr = String(key).trim()
+                                const keyStr = keyText
                                 if (/^\d+$/.test(keyStr)) {
                                     let keystream: Buffer
 

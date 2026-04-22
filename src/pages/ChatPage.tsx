@@ -3658,50 +3658,13 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
     }
   }, [isImage, isVisible, imageLocalPath, imageHasUpdate, imageLoading, requestImageDecrypt])
 
-  const handleOpenImage = useCallback(async () => {
+  const handleOpenImage = useCallback(() => {
     if (!imageLocalPath) return
 
-    let openPath = imageLocalPath
-    let openLiveVideoPath = imageLiveVideoPath
-
-    if (imageHasUpdate && !imageLoading) {
-      try {
-        const result = await window.electronAPI.image.decrypt({
-          sessionId: session.username,
-          imageMd5: message.imageMd5 || undefined,
-          imageDatName: message.imageDatName,
-          force: true
-        })
-        if (result.success && result.localPath) {
-          imageDataUrlCache.set(imageCacheKey, result.localPath)
-          setImageLocalPath(result.localPath)
-          setImageHasUpdate(Boolean((result as { isThumb?: boolean }).isThumb))
-          openPath = result.localPath
-          if ((result as any).liveVideoPath) {
-            setImageLiveVideoPath((result as any).liveVideoPath)
-            openLiveVideoPath = (result as any).liveVideoPath
-          }
-        }
-      } catch {
-        // ignore and fallback to current path
-      }
-    }
-
-    window.electronAPI.window.openImageViewerWindow(openPath, openLiveVideoPath, undefined, {
-      sessionId: session.username,
-      imageMd5: message.imageMd5 || undefined,
-      imageDatName: message.imageDatName
+    void window.electronAPI.window.openImageViewerWindow(imageLocalPath, imageLiveVideoPath).catch((error) => {
+      console.error('[ChatPage] 打开图片查看器失败:', error)
     })
-  }, [
-    imageLocalPath,
-    imageLiveVideoPath,
-    imageHasUpdate,
-    imageLoading,
-    session.username,
-    message.imageMd5,
-    message.imageDatName,
-    imageCacheKey,
-  ])
+  }, [imageLocalPath, imageLiveVideoPath])
 
   const recoverBrokenImagePath = useCallback(async () => {
     if (!isImage) return

@@ -14,11 +14,46 @@ const TELEGRAM_CHAT_IDS = String(process.env.TELEGRAM_CHAT_IDS || '')
 const TELEGRAM_RELEASE_COVER_URL = process.env.TELEGRAM_RELEASE_COVER_URL || ''
 const mode = process.env.TELEGRAM_NOTIFY_MODE || 'success'
 
+class TelegramSendError extends Error {
+  constructor(message, details) {
+    super(message)
+    this.name = 'TelegramSendError'
+    this.details = details
+  }
+}
+
 function escapeHtml(text) {
   return String(text || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+}
+
+function tryParseJson(raw) {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function guessFileNameFromUrl(url, contentType) {
+  try {
+    const pathname = new URL(url).pathname
+    const baseName = path.basename(pathname) || 'release-cover'
+    if (path.extname(baseName)) {
+      return baseName
+    }
+    if (/png/i.test(contentType || '')) return `${baseName}.png`
+    if (/webp/i.test(contentType || '')) return `${baseName}.webp`
+    if (/gif/i.test(contentType || '')) return `${baseName}.gif`
+    return `${baseName}.jpg`
+  } catch {
+    if (/png/i.test(contentType || '')) return 'release-cover.png'
+    if (/webp/i.test(contentType || '')) return 'release-cover.webp'
+    if (/gif/i.test(contentType || '')) return 'release-cover.gif'
+    return 'release-cover.jpg'
+  }
 }
 
 function markdownToPlainSummary(markdown) {
@@ -41,13 +76,11 @@ function getReleaseBody() {
 }
 
 function buildButtons(version) {
-  const releaseUrl = `https://github.com/ILoveBingLu/CipherTalk/releases/tag/v${version}`
-  const installerUrl = `https://github.com/ILoveBingLu/CipherTalk/releases/download/v${version}/CipherTalk-${version}-Setup.exe`
   return {
     inline_keyboard: [
       [
-        { text: '📦 查看 Release', url: releaseUrl },
-        { text: '⬇️ 下载安装包', url: installerUrl }
+        { text: '🌐 官网', url: 'https://miyu.aiqji.com' },
+        { text: '💻 GitHub 仓库', url: 'https://github.com/ILoveBingLu/CipherTalk' }
       ]
     ]
   }
@@ -123,7 +156,7 @@ function buildFailureMessage() {
 }
 
 async function sendTelegramMessage(chatId, text, replyMarkup) {
-  const body = {
+  const messagePayload = {
     chat_id: chatId,
     text,
     parse_mode: 'HTML',
@@ -131,29 +164,132 @@ async function sendTelegramMessage(chatId, text, replyMarkup) {
     reply_markup: replyMarkup
   }
 
-  const endpoint = TELEGRAM_RELEASE_COVER_URL ? 'sendPhoto' : 'sendMessage'
-  const payload = TELEGRAM_RELEASE_COVER_URL
-    ? {
-        chat_id: chatId,
-        photo: TELEGRAM_RELEASE_COVER_URL,
-        caption: text,
-        parse_mode: 'HTML',
-        reply_markup: replyMarkup
-      }
-    : body
+  const photoPayload = {
+    chat_id: chatId,
+    photo: TELEGRAM_RELEASE_COVER_URL,
+    caption: text,
+    parse_mode: 'HTML',
+    reply_markup: replyMarkup
+  }
 
-  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
+  if (!TELEGRAM_RELEASE_COVER_URL) {
+    await callTelegramApi('sendMessage', chatId, messagePayload)
+    return
+  }
+
+  try {
+    const formData = await buildPhotoFormData(photoPayload)
+    await callTelegramApi('sendPhoto', chatId, formData, { bodyType: 'form' })
+  } catch (error) {
+    const description = String(error?.details?.description || error?.message || '')
+    const shouldFallback =
+      !(error instanceof TelegramSendError) ||
+      error?.details?.endpoint === 'sendPhoto' ||
+      error?.details?.stage === 'download_cover'
+
+    if (!shouldFallback) {
+      throw error
+    }
+
+    console.warn('⚠️ Telegram 封面图发送失败，改为纯文本发送', {
+      chatId,
+      coverUrl: TELEGRAM_RELEASE_COVER_URL,
+      description
+    })
+
+    await callTelegramApi('sendMessage', chatId, messagePayload)
+  }
+}
+
+async function buildPhotoFormData(photoPayload) {
+  const downloadResponse = await fetch(TELEGRAM_RELEASE_COVER_URL, {
+    redirect: 'follow'
   })
 
-  if (!response.ok) {
-    const raw = await response.text()
-    throw new Error(`Telegram 发送失败 (${response.status}): ${raw}`)
+  const contentType = downloadResponse.headers.get('content-type') || ''
+
+  if (!downloadResponse.ok) {
+    const raw = await downloadResponse.text()
+    const details = {
+      stage: 'download_cover',
+      coverUrl: TELEGRAM_RELEASE_COVER_URL,
+      status: downloadResponse.status,
+      statusText: downloadResponse.statusText,
+      description: `封面图下载失败 (${downloadResponse.status})`,
+      raw
+    }
+    console.error('❌ Telegram 封面图下载失败', details)
+    throw new TelegramSendError(details.description, details)
   }
+
+  if (!/^image\//i.test(contentType)) {
+    const raw = await downloadResponse.text()
+    const details = {
+      stage: 'download_cover',
+      coverUrl: TELEGRAM_RELEASE_COVER_URL,
+      status: downloadResponse.status,
+      statusText: downloadResponse.statusText,
+      description: `封面图 content-type 不是图片: ${contentType || 'unknown'}`,
+      raw
+    }
+    console.error('❌ Telegram 封面图内容类型错误', details)
+    throw new TelegramSendError(details.description, details)
+  }
+
+  const arrayBuffer = await downloadResponse.arrayBuffer()
+  const fileName = guessFileNameFromUrl(TELEGRAM_RELEASE_COVER_URL, contentType)
+  const formData = new FormData()
+
+  formData.append('chat_id', photoPayload.chat_id)
+  formData.append('photo', new Blob([arrayBuffer], { type: contentType }), fileName)
+  formData.append('caption', photoPayload.caption)
+  formData.append('parse_mode', photoPayload.parse_mode)
+  if (photoPayload.reply_markup) {
+    formData.append('reply_markup', JSON.stringify(photoPayload.reply_markup))
+  }
+
+  return formData
+}
+
+async function callTelegramApi(endpoint, chatId, payload, options = {}) {
+  const bodyType = options.bodyType || 'json'
+  const requestOptions = {
+    method: 'POST',
+    body: bodyType === 'form' ? payload : JSON.stringify(payload)
+  }
+
+  if (bodyType === 'json') {
+    requestOptions.headers = {
+      'Content-Type': 'application/json'
+    }
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${endpoint}`, requestOptions)
+
+  const raw = await response.text()
+  const parsed = tryParseJson(raw)
+
+  if (!response.ok || parsed?.ok === false) {
+    const description = parsed?.description || raw
+    const errorCode = parsed?.error_code
+    const details = {
+      endpoint,
+      chatId,
+      status: response.status,
+      statusText: response.statusText,
+      description,
+      errorCode,
+      raw
+    }
+
+    console.error('❌ Telegram API 返回错误', details)
+    throw new TelegramSendError(
+      `Telegram 发送失败 (${response.status}${errorCode ? `/${errorCode}` : ''}): ${description}`,
+      details
+    )
+  }
+
+  return parsed
 }
 
 async function main() {
@@ -178,6 +314,9 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('❌ Telegram 通知失败:', error)
+  console.error('❌ Telegram 通知失败:', error?.message || error)
+  if (error?.details) {
+    console.error('❌ Telegram 错误详情:', error.details)
+  }
   process.exit(1)
 })

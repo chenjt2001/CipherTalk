@@ -97,6 +97,17 @@ let welcomeWindow: BrowserWindow | null = null
 let chatHistoryWindow: BrowserWindow | null = null
 const allowDevTools = !!process.env.VITE_DEV_SERVER_URL
 
+type ImageViewerListItem = {
+  imagePath: string
+  liveVideoPath?: string
+}
+
+type ImageViewerOpenOptions = {
+  sessionId?: string
+  imageMd5?: string
+  imageDatName?: string
+}
+
 type ReleaseAnnouncementPayload = {
   version: string
   releaseBody?: string
@@ -966,13 +977,27 @@ function createPurchaseWindow() {
   return purchaseWindow
 }
 
+function getImageViewerQueryParams(
+  imagePath: string,
+  liveVideoPath?: string,
+  options?: ImageViewerOpenOptions
+): string {
+  const themeParams = getThemeQueryParams()
+  const imageParam = `imagePath=${encodeURIComponent(imagePath)}`
+  const liveVideoParam = liveVideoPath ? `&liveVideoPath=${encodeURIComponent(liveVideoPath)}` : ''
+  const sessionParam = options?.sessionId ? `&sessionId=${encodeURIComponent(options.sessionId)}` : ''
+  const imageMd5Param = options?.imageMd5 ? `&imageMd5=${encodeURIComponent(options.imageMd5)}` : ''
+  const imageDatNameParam = options?.imageDatName ? `&imageDatName=${encodeURIComponent(options.imageDatName)}` : ''
+  return `${themeParams}&${imageParam}${liveVideoParam}${sessionParam}${imageMd5Param}${imageDatNameParam}`
+}
+
 /**
  * 创建独立的图片查看窗口
  */
 function createImageViewerWindow(
   imagePath: string,
   liveVideoPath?: string,
-  options?: { sessionId?: string; imageMd5?: string; imageDatName?: string }
+  options?: ImageViewerOpenOptions
 ) {
   const iconPath = getAppIconPath()
 
@@ -1004,13 +1029,7 @@ function createImageViewerWindow(
     win.show()
   })
 
-  const themeParams = getThemeQueryParams()
-  const imageParam = `imagePath=${encodeURIComponent(imagePath)}`
-  const liveVideoParam = liveVideoPath ? `&liveVideoPath=${encodeURIComponent(liveVideoPath)}` : ''
-  const sessionParam = options?.sessionId ? `&sessionId=${encodeURIComponent(options.sessionId)}` : ''
-  const imageMd5Param = options?.imageMd5 ? `&imageMd5=${encodeURIComponent(options.imageMd5)}` : ''
-  const imageDatNameParam = options?.imageDatName ? `&imageDatName=${encodeURIComponent(options.imageDatName)}` : ''
-  const queryParams = `${themeParams}&${imageParam}${liveVideoParam}${sessionParam}${imageMd5Param}${imageDatNameParam}`
+  const queryParams = getImageViewerQueryParams(imagePath, liveVideoPath, options)
 
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(`${process.env.VITE_DEV_SERVER_URL}#/image-viewer-window?${queryParams}`)
@@ -1687,21 +1706,21 @@ function registerIpcHandlers() {
       _,
       imagePath: string,
       liveVideoPath?: string,
-      imageList?: Array<{ imagePath: string; liveVideoPath?: string }>,
-      options?: { sessionId?: string; imageMd5?: string; imageDatName?: string }
+      imageList?: ImageViewerListItem[],
+      options?: ImageViewerOpenOptions
     ) => {
       const win = createImageViewerWindow(imagePath, liveVideoPath, options)
-    if (imageList && imageList.length > 1) {
-      const currentIndex = imageList.findIndex(item => item.imagePath === imagePath)
-      win.webContents.once('did-finish-load', () => {
-        if (!win.isDestroyed()) {
-          win.webContents.send('imageViewer:setImageList', {
-            imageList,
-            currentIndex: currentIndex >= 0 ? currentIndex : 0
-          })
-        }
-      })
-    }
+      if (imageList && imageList.length > 1) {
+        const currentIndex = imageList.findIndex(item => item.imagePath === imagePath)
+        win.webContents.once('did-finish-load', () => {
+          if (!win.isDestroyed()) {
+            win.webContents.send('imageViewer:setImageList', {
+              imageList,
+              currentIndex: currentIndex >= 0 ? currentIndex : 0
+            })
+          }
+        })
+      }
     }
   )
 
@@ -2286,22 +2305,9 @@ function registerIpcHandlers() {
   // 视频相关
   ipcMain.handle('video:getVideoInfo', async (_, videoMd5: string, rawContent?: string) => {
     try {
-      console.log('[VideoIPC] getVideoInfo request', {
-        videoMd5,
-        hasRawContent: Boolean(rawContent)
-      })
       const result = videoService.getVideoInfo(videoMd5, rawContent)
-      console.log('[VideoIPC] getVideoInfo response', {
-        videoMd5,
-        exists: result.exists,
-        diagnostics: result.diagnostics
-      })
       return { success: true, ...result }
     } catch (e) {
-      console.error('[VideoIPC] getVideoInfo error', {
-        videoMd5,
-        error: String(e)
-      })
       return { success: false, error: String(e), exists: false }
     }
   })

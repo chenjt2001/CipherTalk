@@ -65,11 +65,13 @@ class VideoService {
   }
 
   private logVideoLookup(stage: string, payload: Record<string, unknown> = {}): void {
-    console.log(`[VideoLookup] ${stage}`, payload)
+    void stage
+    void payload
   }
 
   private warnVideoLookup(stage: string, payload: Record<string, unknown> = {}): void {
-    console.warn(`[VideoLookup] ${stage}`, payload)
+    void stage
+    void payload
   }
 
   private previewRawContent(content?: string): string | undefined {
@@ -134,6 +136,34 @@ class VideoService {
     const normalized = this.normalizeMd5(value)
     if (!normalized || candidates.includes(normalized)) return
     candidates.push(normalized)
+  }
+
+  private normalizeVideoFileKey(value?: string | null): string | undefined {
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^.*[\\/]/, '')
+      .replace(/\.[^.]+$/, '')
+
+    if (!normalized || !/^[a-z0-9_-]{8,}$/.test(normalized)) return undefined
+    return normalized
+  }
+
+  private addVideoFileKeyCandidate(candidates: string[], value?: string | null): void {
+    const normalized = this.normalizeVideoFileKey(value)
+    if (!normalized || candidates.includes(normalized)) return
+    candidates.push(normalized)
+  }
+
+  private addResolvedVideoFileKeyCandidates(candidates: string[], value?: string | null): void {
+    const normalized = this.normalizeVideoFileKey(value)
+    if (!normalized) return
+
+    const normalizedBase = normalized.replace(/_raw$/, '')
+    if (normalizedBase !== normalized) {
+      this.addVideoFileKeyCandidate(candidates, normalizedBase)
+    }
+    this.addVideoFileKeyCandidate(candidates, normalized)
   }
 
   private extractVideoMsgAttribute(content: string, attrName: string): string | undefined {
@@ -329,14 +359,14 @@ class VideoService {
 
       for (const md5 of md5Candidates) {
         const row = stmt.get(md5) as { file_name?: string; md5?: string } | undefined
-        const normalizedFileKey = this.normalizeMd5(row?.file_name?.replace(/\.[^.]+$/, ''))
+        const normalizedFileKey = this.normalizeVideoFileKey(row?.file_name)
         if (!normalizedFileKey) continue
 
         if (!hardlinkMatchedMd5) {
           hardlinkMatchedMd5 = this.normalizeMd5(row?.md5) || md5
         }
 
-        this.addMd5Candidate(fileKeys, normalizedFileKey)
+        this.addResolvedVideoFileKeyCandidates(fileKeys, normalizedFileKey)
       }
 
       this.logVideoLookup('hardlink-query', {
@@ -436,7 +466,7 @@ class VideoService {
 
     const fileKeys = [...candidateMd5s]
     for (const fileKey of hardlinkResult.fileKeys) {
-      this.addMd5Candidate(fileKeys, fileKey)
+      this.addResolvedVideoFileKeyCandidates(fileKeys, fileKey)
     }
     diagnostics.searchedFileKeys = fileKeys
 
@@ -473,8 +503,9 @@ class VideoService {
 
         for (const fileKey of fileKeys) {
           const videoPath = join(dirPath, `${fileKey}.mp4`)
-          const coverPath = join(dirPath, `${fileKey}.jpg`)
-          const thumbPath = join(dirPath, `${fileKey}_thumb.jpg`)
+          const assetKey = fileKey.replace(/_raw$/, '')
+          const coverPath = join(dirPath, `${assetKey}.jpg`)
+          const thumbPath = join(dirPath, `${assetKey}_thumb.jpg`)
 
           // 检查视频文件是否存�?
           if (existsSync(videoPath)) {

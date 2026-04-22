@@ -54,21 +54,18 @@
 
                 &.live-play-btn {
                     position: relative;
-                    background: linear-gradient(135deg, rgba(var(--primary-rgb, 139, 115, 85), 0.15) 0%, rgba(var(--primary-rgb, 139, 115, 85), 0.05) 100%);
-                    backdrop-filter: blur(16px);
-                    -webkit-backdrop-filter: blur(16px);
-                    border: 1px solid rgba(255, 255, 255, 0.15);
-                    border-radius: 40px;
-                    color: var(--primary);
+                    background: rgba(255, 255, 255, 0.22);
+                    backdrop-filter: blur(8px);
+                    -webkit-backdrop-filter: blur(8px);
+                    border: 1px solid rgba(255, 255, 255, 0.22);
+                    border-radius: 999px;
+                    color: var(--text-primary);
                     font-weight: 600;
                     font-size: 12px;
                     padding: 4px 14px;
                     height: 28px;
                     gap: 6px;
-                    box-shadow:
-                        0 4px 16px rgba(var(--primary-rgb, 139, 115, 85), 0.1),
-                        inset 0 4px 10px -2px rgba(255, 255, 255, 0.4),
-                        inset 0 -2px 10px rgba(0, 0, 0, 0.05);
+                    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
 
                     &::before {
                         content: attr(data-tooltip);
@@ -95,12 +92,9 @@
                     }
 
                     &:hover {
-                        background: linear-gradient(135deg, rgba(var(--primary-rgb, 139, 115, 85), 0.25) 0%, rgba(var(--primary-rgb, 139, 115, 85), 0.1) 100%);
-                        border-color: rgba(255, 255, 255, 0.25);
-                        box-shadow:
-                            0 6px 20px rgba(var(--primary-rgb, 139, 115, 85), 0.15),
-                            inset 0 4px 12px -2px rgba(255, 255, 255, 0.5),
-                            inset 0 -2px 10px rgba(0, 0, 0, 0.05);
+                        background: rgba(255, 255, 255, 0.3);
+                        border-color: rgba(255, 255, 255, 0.28);
+                        box-shadow: 0 6px 14px rgba(0, 0, 0, 0.16);
                         transform: translateY(1px);
 
                         &::before {
@@ -111,10 +105,10 @@
                     }
 
                     &.active {
-                        background: rgba(0, 122, 255, 0.7);
-                        border-color: rgba(0, 122, 255, 0.5);
-                        color: white !important;
-                        box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+                        background: rgba(var(--primary-rgb, 139, 115, 85), 0.18);
+                        border-color: rgba(var(--primary-rgb, 139, 115, 85), 0.28);
+                        color: var(--primary) !important;
+                        box-shadow: 0 4px 12px rgba(var(--primary-rgb, 139, 115, 85), 0.18);
                     }
 
                     &:disabled {
@@ -170,7 +164,16 @@
             align-items: center;
             justify-content: center;
             will-change: transform;
+            touch-action: none;
             // The transform (scale/translate/rotate) will be applied here via inline styles
+
+            &.pannable {
+                cursor: grab;
+
+                &:active {
+                    cursor: grabbing;
+                }
+            }
 
             img,
             video {
@@ -178,17 +181,9 @@
                 max-width: none;
                 max-height: none;
                 // object-fit: contain; // Removed, handled by wrapper size
-                pointer-events: auto;
+                pointer-events: none;
                 cursor: auto;
                 box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15); // Shadow on the image itself
-
-                &.pannable {
-                    cursor: grab;
-
-                    &:active {
-                        cursor: grabbing;
-                    }
-                }
             }
 
             .live-video {
@@ -217,30 +212,23 @@
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            border: none;
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 100%);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
             border: 1px solid rgba(255, 255, 255, 0.15);
-            box-shadow:
-                0 4px 16px rgba(0, 0, 0, 0.1),
-                inset 0 4px 10px -2px rgba(255, 255, 255, 0.3),
-                inset 0 -2px 10px rgba(0, 0, 0, 0.05);
+            background: rgba(255, 255, 255, 0.22);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
             color: rgba(255, 255, 255, 0.9);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             opacity: 0;
-            transition: all 0.3s cubic-bezier(0.25, 1.5, 0.5, 1);
+            transition: all 0.2s ease;
 
             &:hover {
-                background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.05) 100%);
-                border-color: rgba(255, 255, 255, 0.25);
-                box-shadow:
-                    0 6px 20px rgba(0, 0, 0, 0.15),
-                    inset 0 4px 12px -2px rgba(255, 255, 255, 0.5),
-                    inset 0 -2px 10px rgba(0, 0, 0, 0.05);
+                background: rgba(255, 255, 255, 0.3);
+                border-color: rgba(255, 255, 255, 0.28);
+                box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
                 color: white;
                 transform: translateY(calc(-50% - 2px));
             }
