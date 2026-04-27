@@ -112,6 +112,8 @@ interface ConfigSchema {
   aiMessageLimit: number     // 摘要提取的消息条数限制
   aiEmbeddingModelProfile: string
   aiEmbeddingDevice: 'cpu' | 'dml'
+  aiRerankEnabled: boolean
+  aiRerankerModelProfile: string
   mcpEnabled: boolean
   mcpExposeMediaPaths: boolean
   mcpProxyPort: number
@@ -176,6 +178,8 @@ const defaults: ConfigSchema = {
   aiMessageLimit: 3000,    // 默认3000条，用户可调至5000
   aiEmbeddingModelProfile: 'bge-large-zh-v1.5-int8',
   aiEmbeddingDevice: 'cpu',
+  aiRerankEnabled: true,
+  aiRerankerModelProfile: 'qwen3-reranker-0.6b-onnx-q8',
   mcpEnabled: false,
   mcpExposeMediaPaths: true,
   mcpProxyPort: 5032,

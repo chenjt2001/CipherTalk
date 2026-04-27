@@ -229,7 +229,8 @@ export function registerCipherTalkMcpTools(server: any) {
       matchMode: z.enum(['substring', 'exact']).optional().describe('Search match mode.'),
       limit: z.number().int().positive().optional().describe('Maximum number of hits to return.'),
       includeRaw: z.boolean().optional().describe('Include raw message content when true.'),
-      includeMediaPaths: z.boolean().optional().describe('Resolve media local paths when true.')
+      includeMediaPaths: z.boolean().optional().describe('Resolve media local paths when true.'),
+      rerank: z.boolean().optional().describe('When true, rerank indexed recall candidates with the local Qwen3 reranker if available.')
     },
     outputSchema: toolOutputSchemas.search_messages
   }, async (args: unknown) => {
