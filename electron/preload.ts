@@ -24,6 +24,16 @@ type SessionQAJobEvent = {
   error?: string
 }
 
+type SessionQAConversationEvent = {
+  id: number
+  sessionId: string
+  title: string
+  titleStatus: string
+  updatedAt: number
+  lastMessageAt: number
+  [key: string]: unknown
+}
+
 type SessionVectorIndexProgressEvent = {
   sessionId: string
   stage: string
@@ -539,6 +549,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     estimateCost: (messageCount: number, provider: string) => ipcRenderer.invoke('ai:estimateCost', messageCount, provider),
     getUsageStats: (startDate?: string, endDate?: string) => ipcRenderer.invoke('ai:getUsageStats', startDate, endDate),
     getSummaryHistory: (sessionId: string, limit?: number) => ipcRenderer.invoke('ai:getSummaryHistory', sessionId, limit),
+    listSessionQAConversations: (sessionId: string, limit?: number) =>
+      ipcRenderer.invoke('ai:listSessionQAConversations', sessionId, limit),
+    getSessionQAConversation: (conversationId: number) =>
+      ipcRenderer.invoke('ai:getSessionQAConversation', conversationId),
+    createSessionQAConversation: (options: { sessionId: string; sessionName?: string; linkedSummaryId?: number }) =>
+      ipcRenderer.invoke('ai:createSessionQAConversation', options),
+    renameSessionQAConversation: (conversationId: number, title: string) =>
+      ipcRenderer.invoke('ai:renameSessionQAConversation', conversationId, title),
+    deleteSessionQAConversation: (conversationId: number) =>
+      ipcRenderer.invoke('ai:deleteSessionQAConversation', conversationId),
     deleteSummary: (id: number) => ipcRenderer.invoke('ai:deleteSummary', id),
     renameSummary: (id: number, customName: string) => ipcRenderer.invoke('ai:renameSummary', id, customName),
     cleanExpiredCache: () => ipcRenderer.invoke('ai:cleanExpiredCache'),
@@ -567,6 +587,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }) => ipcRenderer.invoke('ai:askSessionQuestion', options),
     startSessionQuestion: (options: {
       requestId?: string
+      conversationId?: number
       sessionId: string
       sessionName?: string
       question: string
@@ -606,6 +627,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const listener = (_: any, event: SessionQAJobEvent) => callback(event)
       ipcRenderer.on('ai:sessionQaEvent', listener)
       return () => ipcRenderer.removeListener('ai:sessionQaEvent', listener)
+    },
+    onSessionQAConversationUpdated: (callback: (event: SessionQAConversationEvent) => void) => {
+      const listener = (_: any, event: SessionQAConversationEvent) => callback(event)
+      ipcRenderer.on('ai:sessionQaConversationUpdated', listener)
+      return () => ipcRenderer.removeListener('ai:sessionQaConversationUpdated', listener)
     },
     onSessionVectorIndexProgress: (callback: (event: SessionVectorIndexProgressEvent) => void) => {
       ipcRenderer.on('ai:sessionVectorIndexProgress', (_, event) => callback(event))

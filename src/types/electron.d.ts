@@ -5,6 +5,8 @@ import type {
   EmbeddingModelDownloadProgress,
   EmbeddingModelProfile,
   EmbeddingModelStatus,
+  SessionQAConversationDetail,
+  SessionQAConversationSummary,
   SessionQAHistoryMessage,
   SessionQAJobEvent,
   SessionQAProgressEvent,
@@ -1034,6 +1036,29 @@ export interface ElectronAPI {
       history?: SummaryResult[]
       error?: string
     }>
+    listSessionQAConversations: (sessionId: string, limit?: number) => Promise<{
+      success: boolean
+      conversations?: SessionQAConversationSummary[]
+      error?: string
+    }>
+    getSessionQAConversation: (conversationId: number) => Promise<{
+      success: boolean
+      conversation?: SessionQAConversationDetail
+      error?: string
+    }>
+    createSessionQAConversation: (options: { sessionId: string; sessionName?: string; linkedSummaryId?: number }) => Promise<{
+      success: boolean
+      conversation?: SessionQAConversationSummary
+      error?: string
+    }>
+    renameSessionQAConversation: (conversationId: number, title: string) => Promise<{
+      success: boolean
+      error?: string
+    }>
+    deleteSessionQAConversation: (conversationId: number) => Promise<{
+      success: boolean
+      error?: string
+    }>
     deleteSummary: (id: number) => Promise<{
       success: boolean
       error?: string
@@ -1084,6 +1109,7 @@ export interface ElectronAPI {
     }>
     startSessionQuestion: (options: {
       requestId?: string
+      conversationId?: number
       sessionId: string
       sessionName?: string
       question: string
@@ -1157,6 +1183,7 @@ export interface ElectronAPI {
     onSessionQAChunk: (callback: (chunk: string) => void) => () => void
     onSessionQAProgress: (callback: (event: SessionQAProgressEvent) => void) => () => void
     onSessionQAEvent: (callback: (event: SessionQAJobEvent) => void) => () => void
+    onSessionQAConversationUpdated: (callback: (event: SessionQAConversationDetail) => void) => () => void
     onSessionVectorIndexProgress: (callback: (event: SessionVectorIndexProgressEvent) => void) => () => void
     onEmbeddingModelDownloadProgress: (callback: (event: EmbeddingModelDownloadProgress) => void) => () => void
   }

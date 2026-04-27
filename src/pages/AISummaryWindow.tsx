@@ -19,6 +19,8 @@ import {
   LoaderPinwheel,
   MessageCircle,
   Mic,
+  Pencil,
+  Plus,
   RefreshCw,
   Send,
   Smile,
@@ -32,8 +34,11 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import {
   TIME_RANGE_OPTIONS,
+  type SessionQAConversationDetail,
+  type SessionQAConversationSummary,
   type SessionQAHistoryMessage,
   type SessionQAJobEvent,
+  type SessionQAMessageRecord,
   type SessionQAProgressEvent,
   type SessionQAResult,
   type SummaryEvidenceRef,
@@ -522,6 +527,29 @@ function appendQAChunkToMessage(message: QAMessage, chunk: string): QAMessage {
   return next
 }
 
+function mapStoredQAMessage(record: SessionQAMessageRecord): QAMessage {
+  const result = record.result
+    ? {
+        ...record.result,
+        evidenceRefs: record.evidenceRefs || record.result.evidenceRefs,
+        toolCalls: record.toolCalls || record.result.toolCalls
+      }
+    : undefined
+
+  return {
+    id: `stored-${record.id}`,
+    role: record.role,
+    content: record.content,
+    createdAt: record.createdAt,
+    error: record.error,
+    result,
+    thinkContent: record.thinkContent,
+    isThinking: false,
+    showThink: false,
+    requestId: record.requestId
+  }
+}
+
 function AISummaryWindow() {
   const { isMac } = usePlatformInfo()
   const [sessionId, setSessionId] = useState<string>('')
@@ -542,6 +570,10 @@ function AISummaryWindow() {
   const [result, setResult] = useState<SummaryResult | null>(null)
   const [activeResultTab, setActiveResultTab] = useState<ResultTabId>('markdown')
   const [qaInput, setQaInput] = useState('')
+  const [qaConversations, setQaConversations] = useState<SessionQAConversationSummary[]>([])
+  const [activeQAConversationId, setActiveQAConversationId] = useState<number | null>(null)
+  const [isLoadingQAConversations, setIsLoadingQAConversations] = useState(false)
+  const [isLoadingQAConversation, setIsLoadingQAConversation] = useState(false)
   const [qaMessages, setQaMessages] = useState<QAMessage[]>([])
   const [isAsking, setIsAsking] = useState(false)
   const [activeQARequestId, setActiveQARequestId] = useState<string | null>(null)
@@ -566,6 +598,11 @@ function AISummaryWindow() {
   const [showRenameDialog, setShowRenameDialog] = useState(false)
   const [renameTargetId, setRenameTargetId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [showDeleteQADialog, setShowDeleteQADialog] = useState(false)
+  const [deleteQATargetId, setDeleteQATargetId] = useState<number | null>(null)
+  const [showRenameQADialog, setShowRenameQADialog] = useState(false)
+  const [renameQATargetId, setRenameQATargetId] = useState<number | null>(null)
+  const [renameQAValue, setRenameQAValue] = useState('')
 
   const getTimeRangeDisplay = (days: number) => days === 0 ? '全部消息' : `${days}天`
   const getDefaultSummaryName = (days: number) => days === 0 ? '全部消息摘要' : `${days}天摘要`
@@ -1435,6 +1472,18 @@ function AISummaryWindow() {
     return cleanup
   }, [])
 
+  useEffect(() => {
+    const cleanup = window.electronAPI.ai.onSessionQAConversationUpdated((conversation: SessionQAConversationDetail) => {
+      if (!conversation || conversation.sessionId !== sessionId) return
+      upsertQAConversation(conversation)
+      if (conversation.id === activeQAConversationId && !isAsking && qaMessages.length === 0) {
+        setQaMessages(conversation.messages.map(mapStoredQAMessage))
+      }
+    })
+
+    return cleanup
+  }, [activeQAConversationId, isAsking, qaMessages.length, sessionId])
+
   // 从 URL 参数获取 sessionId
   useEffect(() => {
     // 从 query 参数获取（不是 hash 参数）
@@ -1453,6 +1502,7 @@ function AISummaryWindow() {
 
       // 加载历史记录
       loadHistory(sid)
+      loadQAConversations(sid)
     } else {
       setError('未能获取会话信息，请重新打开窗口')
     }
@@ -1567,6 +1617,141 @@ function AISummaryWindow() {
       }
     } catch (e) {
       console.error('加载历史记录失败:', e)
+    }
+  }
+
+  const upsertQAConversation = (conversation: SessionQAConversationSummary) => {
+    setQaConversations(prev => {
+      const next = [
+        conversation,
+        ...prev.filter(item => item.id !== conversation.id)
+      ]
+      return next.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0))
+    })
+  }
+
+  const loadQAConversation = async (conversationId: number) => {
+    setIsLoadingQAConversation(true)
+    setQaError('')
+    try {
+      const result = await window.electronAPI.ai.getSessionQAConversation(conversationId)
+      if (!result.success || !result.conversation) {
+        throw new Error(result.error || '读取问答会话失败')
+      }
+
+      setActiveQAConversationId(result.conversation.id)
+      setQaMessages(result.conversation.messages.map(mapStoredQAMessage))
+      upsertQAConversation(result.conversation)
+      setExpandedQAEvidenceIds(new Set())
+      setExpandedQAProgressIds(new Set())
+    } catch (e) {
+      setQaError(String(e))
+    } finally {
+      setIsLoadingQAConversation(false)
+    }
+  }
+
+  const loadQAConversations = async (sid: string, selectLatest = true) => {
+    setIsLoadingQAConversations(true)
+    try {
+      const result = await window.electronAPI.ai.listSessionQAConversations(sid, 50)
+      if (result.success && result.conversations) {
+        setQaConversations(result.conversations)
+        if (selectLatest) {
+          if (result.conversations.length > 0) {
+            await loadQAConversation(result.conversations[0].id)
+          } else {
+            setActiveQAConversationId(null)
+            setQaMessages([])
+          }
+        }
+      }
+    } catch (e) {
+      setQaError(String(e))
+    } finally {
+      setIsLoadingQAConversations(false)
+    }
+  }
+
+  const createQAConversation = async () => {
+    if (!sessionId) return null
+    const result = await window.electronAPI.ai.createSessionQAConversation({
+      sessionId,
+      sessionName
+    })
+    if (!result.success || !result.conversation) {
+      throw new Error(result.error || '创建问答会话失败')
+    }
+    upsertQAConversation(result.conversation)
+    setActiveQAConversationId(result.conversation.id)
+    setQaMessages([])
+    setExpandedQAEvidenceIds(new Set())
+    setExpandedQAProgressIds(new Set())
+    window.setTimeout(() => qaInputRef.current?.focus(), 0)
+    return result.conversation
+  }
+
+  const ensureActiveQAConversation = async () => {
+    if (activeQAConversationId) return activeQAConversationId
+    const conversation = await createQAConversation()
+    return conversation?.id || null
+  }
+
+  const handleNewQAConversation = async () => {
+    try {
+      setQaError('')
+      await createQAConversation()
+    } catch (e) {
+      setQaError(String(e))
+    }
+  }
+
+  const handleRenameQAConversation = (conversation: SessionQAConversationSummary, event?: { stopPropagation: () => void }) => {
+    event?.stopPropagation()
+    setRenameQATargetId(conversation.id)
+    setRenameQAValue(conversation.title)
+    setShowRenameQADialog(true)
+  }
+
+  const confirmRenameQAConversation = async () => {
+    if (!renameQATargetId || !renameQAValue.trim()) return
+    try {
+      const result = await window.electronAPI.ai.renameSessionQAConversation(renameQATargetId, renameQAValue.trim())
+      if (!result.success) throw new Error(result.error || '重命名失败')
+      await loadQAConversations(sessionId, false)
+      setShowRenameQADialog(false)
+      setRenameQATargetId(null)
+      setRenameQAValue('')
+    } catch (e) {
+      setQaError(String(e))
+    }
+  }
+
+  const handleDeleteQAConversation = (conversationId: number, event?: { stopPropagation: () => void }) => {
+    event?.stopPropagation()
+    setDeleteQATargetId(conversationId)
+    setShowDeleteQADialog(true)
+  }
+
+  const confirmDeleteQAConversation = async () => {
+    if (!deleteQATargetId) return
+    try {
+      const result = await window.electronAPI.ai.deleteSessionQAConversation(deleteQATargetId)
+      if (!result.success) throw new Error(result.error || '删除失败')
+      const remaining = qaConversations.filter(item => item.id !== deleteQATargetId)
+      setQaConversations(remaining)
+      if (activeQAConversationId === deleteQATargetId) {
+        if (remaining.length > 0) {
+          await loadQAConversation(remaining[0].id)
+        } else {
+          setActiveQAConversationId(null)
+          setQaMessages([])
+        }
+      }
+      setShowDeleteQADialog(false)
+      setDeleteQATargetId(null)
+    } catch (e) {
+      setQaError(String(e))
     }
   }
 
@@ -1717,6 +1902,19 @@ function AISummaryWindow() {
     setIsAsking(true)
 
     const historyForRequest = getQAHistory(qaMessages)
+    let conversationId: number | null = null
+    try {
+      conversationId = await ensureActiveQAConversation()
+    } catch (e) {
+      setQaError(String(e))
+      setIsAsking(false)
+      return
+    }
+    if (!conversationId) {
+      setQaError('创建问答会话失败')
+      setIsAsking(false)
+      return
+    }
     const requestId = `qa-${Date.now()}-${Math.random().toString(16).slice(2)}`
     const userMessage: QAMessage = {
       id: buildMessageId(),
@@ -1753,6 +1951,7 @@ function AISummaryWindow() {
 
       const response = await window.electronAPI.ai.startSessionQuestion({
         requestId,
+        conversationId,
         sessionId,
         sessionName,
         question,
@@ -1767,6 +1966,9 @@ function AISummaryWindow() {
 
       if (!response.success || !response.requestId) {
         throw new Error(response.error || '问答任务启动失败')
+      }
+      if (response.conversationId && response.conversationId !== activeQAConversationId) {
+        setActiveQAConversationId(response.conversationId)
       }
     } catch (e) {
       const message = String(e)
@@ -1896,13 +2098,187 @@ function AISummaryWindow() {
     )
   }
 
+  const renderSummaryHistorySidebar = () => (
+    <section className="sidebar-record-section">
+      <div className="sidebar-record-header">
+        <span>摘要记录</span>
+        <span className="sidebar-record-count">{history.length}</span>
+      </div>
+
+      <div className="sidebar-record-list">
+        {history.length === 0 ? (
+          <div className="sidebar-empty-state">暂无摘要记录</div>
+        ) : (
+          history.map((item) => {
+            const title = item.customName || getDefaultSummaryName(item.timeRangeDays)
+            const isActive = result?.id === item.id
+
+            return (
+              <div
+                key={item.id}
+                className={`sidebar-record-item summary-record ${isActive ? 'active' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setDisplayedResult(item)
+                  loadProviderInfo(item.provider)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    setDisplayedResult(item)
+                    loadProviderInfo(item.provider)
+                  }
+                }}
+              >
+                <span className="sidebar-record-title">{title}</span>
+                <span className="sidebar-record-preview">{getTimeRangeDisplay(item.timeRangeDays)}</span>
+                <span className="sidebar-record-meta">
+                  <span>{formatCreatedAt(item.createdAt)}</span>
+                  <span>{item.messageCount} 条</span>
+                </span>
+                <span className="sidebar-record-actions">
+                  <button
+                    type="button"
+                    className="sidebar-record-action"
+                    onClick={(event) => handleRenameHistory(item.id!, title, event)}
+                    data-tooltip="重命名"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    className="sidebar-record-action danger"
+                    onClick={(event) => handleDeleteHistory(item.id!, event)}
+                    data-tooltip="删除"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </span>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </section>
+  )
+
+  const renderQAConversationSidebar = () => (
+    <section className="sidebar-record-section">
+      <div className="sidebar-record-header">
+        <span>问 AI 会话</span>
+        <button
+          type="button"
+          className="sidebar-record-new"
+          onClick={handleNewQAConversation}
+          disabled={isAsking}
+          data-tooltip="新建会话"
+        >
+          <Plus size={15} />
+        </button>
+      </div>
+
+      <div className="sidebar-record-list">
+        {isLoadingQAConversations ? (
+          <div className="sidebar-empty-state loading">
+            <Loader2 size={14} className="spinner" />
+            <span>加载中...</span>
+          </div>
+        ) : qaConversations.length === 0 ? (
+          <div className="sidebar-empty-state">暂无历史会话</div>
+        ) : (
+          qaConversations.map((conversation) => (
+            <button
+              key={conversation.id}
+              type="button"
+              className={`sidebar-record-item qa-record ${activeQAConversationId === conversation.id ? 'active' : ''}`}
+              onClick={() => loadQAConversation(conversation.id)}
+              disabled={isAsking && activeQAConversationId !== conversation.id}
+            >
+              <span className="sidebar-record-title">{conversation.title}</span>
+              <span className="sidebar-record-preview">
+                {conversation.lastMessagePreview || '新对话'}
+              </span>
+              <span className="sidebar-record-meta">
+                <span>{formatCreatedAt(conversation.lastMessageAt || conversation.updatedAt)}</span>
+                <span>{conversation.messageCount} 条</span>
+              </span>
+              <span className="sidebar-record-actions">
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="sidebar-record-action"
+                  onClick={(event) => handleRenameQAConversation(conversation, event)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') handleRenameQAConversation(conversation, event)
+                  }}
+                  data-tooltip="重命名"
+                >
+                  <Pencil size={12} />
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="sidebar-record-action danger"
+                  onClick={(event) => handleDeleteQAConversation(conversation.id, event)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') handleDeleteQAConversation(conversation.id, event)
+                  }}
+                  data-tooltip="删除"
+                >
+                  <Trash2 size={12} />
+                </span>
+              </span>
+            </button>
+          ))
+        )}
+      </div>
+    </section>
+  )
+
+  const renderSidebarContent = () => (
+    <>
+      <div className="sidebar-mode-tabs" role="tablist" aria-label="AI 工作模式">
+        <button
+          type="button"
+          className={`sidebar-mode-tab ${workspaceMode === 'summary' ? 'active' : ''}`}
+          onClick={() => setWorkspaceMode('summary')}
+        >
+          <LayoutDashboard size={15} />
+          <span>智能摘要</span>
+        </button>
+        <button
+          type="button"
+          className={`sidebar-mode-tab ${workspaceMode === 'ask' ? 'active' : ''}`}
+          onClick={() => {
+            if (isGenerating) return
+            setWorkspaceMode('ask')
+            setTimeout(() => qaInputRef.current?.focus(), 0)
+          }}
+          disabled={isGenerating}
+        >
+          <MessageCircle size={15} />
+          <span>对话问答</span>
+        </button>
+      </div>
+
+      {workspaceMode === 'summary'
+        ? renderSummaryHistorySidebar()
+        : renderQAConversationSidebar()}
+    </>
+  )
+
   const renderAskPanel = () => (
     <div className="qa-panel">
       <div className="qa-thread" ref={qaContentRef}>
-        {qaMessages.length === 0 ? (
+        {isLoadingQAConversation ? (
+          <div className="qa-empty">
+            <Loader2 size={24} className="spinner" />
+            <p>正在加载问答会话...</p>
+          </div>
+        ) : qaMessages.length === 0 ? (
           <div className="qa-empty">
             <MessageCircle size={28} />
-            <p>问一个关于当前会话的问题</p>
+            <p>{activeQAConversationId ? '这个问答会话还没有消息' : '新建会话，或直接问一个关于当前聊天的问题'}</p>
           </div>
         ) : (
           qaMessages.map((message) => (
@@ -2087,27 +2463,7 @@ function AISummaryWindow() {
 
       <div className="app-layout">
         <aside className="sidebar">
-          <div className="sidebar-nav">
-            <button
-              type="button"
-              className={`nav-btn ${workspaceMode === 'summary' ? 'active' : ''}`}
-              onClick={() => setWorkspaceMode('summary')}
-            >
-              <LayoutDashboard size={18} />
-              <span>智能摘要</span>
-            </button>
-            <button
-              type="button"
-              className={`nav-btn ${workspaceMode === 'ask' ? 'active' : ''}`}
-              onClick={() => {
-                setWorkspaceMode('ask')
-                setTimeout(() => qaInputRef.current?.focus(), 0)
-              }}
-            >
-              <MessageCircle size={18} />
-              <span>对话问答</span>
-            </button>
-          </div>
+          {renderSidebarContent()}
         </aside>
 
         <main className="main-content">
@@ -2181,53 +2537,6 @@ function AISummaryWindow() {
               </button>
             </div>
 
-            {history.length > 0 && (
-              <div className="history-section">
-                <h3>历史记录</h3>
-                <div className="history-list">
-                  {history.map((item) => (
-                    <div
-                      key={item.id}
-                      className="history-item"
-                      onClick={() => {
-                        setDisplayedResult(item)
-                        loadProviderInfo(item.provider)
-                      }}
-                    >
-                      <div className="history-header">
-                        <span className="history-name">{item.customName || '自定义记录名'}</span>
-                        <span className="history-date">
-                          {new Date(item.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}
-                        </span>
-                      </div>
-                      <div className="history-range">{getTimeRangeDisplay(item.timeRangeDays)}</div>
-                      <div className="history-info">
-                        <span>{item.messageCount}条消息</span>
-                        <span>¥{item.cost.toFixed(4)}</span>
-                      </div>
-                      <div className="history-actions">
-                        <button
-                          className="action-btn rename-btn"
-                          onClick={(e) => handleRenameHistory(item.id!, item.customName || getDefaultSummaryName(item.timeRangeDays), e)}
-                          data-tooltip="重命名"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
-                          </svg>
-                        </button>
-                        <button
-                          className="action-btn delete-btn"
-                          onClick={(e) => handleDeleteHistory(item.id!, e)}
-                          data-tooltip="删除"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -2370,6 +2679,62 @@ function AISummaryWindow() {
                 取消
               </button>
               <button className="dialog-btn confirm-btn" onClick={confirmRename}>
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteQADialog && (
+        <div className="dialog-overlay" onClick={() => setShowDeleteQADialog(false)}>
+          <div className="dialog-box" onClick={(e) => e.stopPropagation()}>
+            <div className="dialog-header">
+              <h3>确认删除</h3>
+            </div>
+            <div className="dialog-content">
+              <p>确定要删除这个问 AI 会话吗？此操作无法撤销。</p>
+            </div>
+            <div className="dialog-actions">
+              <button className="dialog-btn cancel-btn" onClick={() => setShowDeleteQADialog(false)}>
+                取消
+              </button>
+              <button className="dialog-btn confirm-btn delete" onClick={confirmDeleteQAConversation}>
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRenameQADialog && (
+        <div className="dialog-overlay" onClick={() => setShowRenameQADialog(false)}>
+          <div className="dialog-box" onClick={(e) => e.stopPropagation()}>
+            <div className="dialog-header">
+              <h3>重命名问 AI 会话</h3>
+            </div>
+            <div className="dialog-content">
+              <input
+                type="text"
+                className="rename-input"
+                value={renameQAValue}
+                onChange={(e) => setRenameQAValue(e.target.value)}
+                placeholder="请输入新标题"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    confirmRenameQAConversation()
+                  } else if (e.key === 'Escape') {
+                    setShowRenameQADialog(false)
+                  }
+                }}
+              />
+            </div>
+            <div className="dialog-actions">
+              <button className="dialog-btn cancel-btn" onClick={() => setShowRenameQADialog(false)}>
+                取消
+              </button>
+              <button className="dialog-btn confirm-btn" onClick={confirmRenameQAConversation}>
                 确定
               </button>
             </div>

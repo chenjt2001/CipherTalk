@@ -8,6 +8,14 @@ import type {
   SummaryEvidenceRef
 } from '../ai-agent/types/analysis'
 import { parseStoredStructuredAnalysis } from '../ai-agent/types/analysis'
+import type {
+  SessionQAConversationDetail,
+  SessionQAConversationSummary,
+  SessionQAConversationTitleStatus,
+  SessionQAMessageRecord,
+  SessionQAResult,
+  SessionQAToolCall
+} from '../../../src/types/ai'
 
 type AnalysisRunStatus =
   | 'completed'
@@ -347,6 +355,46 @@ export class AIDatabase {
 
       CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_links_fact_message ON evidence_links(fact_id, local_id, create_time, sort_seq);
       CREATE INDEX IF NOT EXISTS idx_evidence_links_run ON evidence_links(run_id);
+
+      CREATE TABLE IF NOT EXISTS qa_conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        session_name TEXT,
+        title TEXT NOT NULL DEFAULT '新对话',
+        title_status TEXT NOT NULL DEFAULT 'pending',
+        linked_summary_id INTEGER,
+        provider TEXT,
+        model TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_message_at INTEGER NOT NULL,
+        deleted_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_qa_conversations_session ON qa_conversations(session_id, deleted_at, last_message_at);
+      CREATE INDEX IF NOT EXISTS idx_qa_conversations_updated ON qa_conversations(updated_at);
+
+      CREATE TABLE IF NOT EXISTS qa_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        think_content TEXT,
+        error TEXT,
+        result_json TEXT,
+        evidence_refs_json TEXT,
+        tool_calls_json TEXT,
+        tokens_used INTEGER,
+        cost REAL,
+        provider TEXT,
+        model TEXT,
+        request_id TEXT,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (conversation_id) REFERENCES qa_conversations(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_qa_messages_conversation ON qa_messages(conversation_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_qa_messages_request ON qa_messages(request_id);
     `)
 
     try {
@@ -803,6 +851,212 @@ export class AIDatabase {
     }
   }
 
+  createSessionQAConversation(input: {
+    sessionId: string
+    sessionName?: string
+    linkedSummaryId?: number
+    provider?: string
+    model?: string
+  }): SessionQAConversationSummary {
+    const db = this.getDb()
+    const now = Date.now()
+    const result = db.prepare(`
+      INSERT INTO qa_conversations (
+        session_id, session_name, title, title_status, linked_summary_id,
+        provider, model, created_at, updated_at, last_message_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.sessionId,
+      input.sessionName || null,
+      '新对话',
+      'pending',
+      input.linkedSummaryId ?? null,
+      input.provider || null,
+      input.model || null,
+      now,
+      now,
+      now
+    )
+
+    return this.getSessionQAConversationSummary(result.lastInsertRowid as number)!
+  }
+
+  listSessionQAConversations(sessionId: string, limit: number = 30): SessionQAConversationSummary[] {
+    const db = this.getDb()
+    const normalizedLimit = Math.max(1, Math.min(100, Math.floor(limit || 30)))
+    const rows = db.prepare(`
+      SELECT
+        c.*,
+        (
+          SELECT COUNT(*)
+          FROM qa_messages m
+          WHERE m.conversation_id = c.id
+        ) AS message_count,
+        (
+          SELECT COALESCE(NULLIF(m.content, ''), m.error, '')
+          FROM qa_messages m
+          WHERE m.conversation_id = c.id
+          ORDER BY m.created_at DESC, m.id DESC
+          LIMIT 1
+        ) AS last_message_preview
+      FROM qa_conversations c
+      WHERE c.session_id = ? AND c.deleted_at IS NULL
+      ORDER BY c.last_message_at DESC, c.updated_at DESC, c.id DESC
+      LIMIT ?
+    `).all(sessionId, normalizedLimit)
+
+    return rows.map((row: any) => this.mapQAConversationRow(row))
+  }
+
+  getSessionQAConversation(conversationId: number): SessionQAConversationDetail | null {
+    const summary = this.getSessionQAConversationSummary(conversationId)
+    if (!summary) return null
+
+    const db = this.getDb()
+    const rows = db.prepare(`
+      SELECT *
+      FROM qa_messages
+      WHERE conversation_id = ?
+      ORDER BY created_at ASC, id ASC
+    `).all(conversationId)
+
+    return {
+      ...summary,
+      messages: rows.map((row: any) => this.mapQAMessageRow(row))
+    }
+  }
+
+  getSessionQAConversationSummary(conversationId: number): SessionQAConversationSummary | null {
+    const db = this.getDb()
+    const row = db.prepare(`
+      SELECT
+        c.*,
+        (
+          SELECT COUNT(*)
+          FROM qa_messages m
+          WHERE m.conversation_id = c.id
+        ) AS message_count,
+        (
+          SELECT COALESCE(NULLIF(m.content, ''), m.error, '')
+          FROM qa_messages m
+          WHERE m.conversation_id = c.id
+          ORDER BY m.created_at DESC, m.id DESC
+          LIMIT 1
+        ) AS last_message_preview
+      FROM qa_conversations c
+      WHERE c.id = ? AND c.deleted_at IS NULL
+    `).get(conversationId)
+
+    return row ? this.mapQAConversationRow(row) : null
+  }
+
+  renameSessionQAConversation(conversationId: number, title: string): boolean {
+    const db = this.getDb()
+    const normalizedTitle = this.normalizeQATitle(title)
+    if (!normalizedTitle) return false
+
+    const result = db.prepare(`
+      UPDATE qa_conversations
+      SET title = ?, title_status = 'manual', updated_at = ?
+      WHERE id = ? AND deleted_at IS NULL
+    `).run(normalizedTitle, Date.now(), conversationId)
+
+    return result.changes > 0
+  }
+
+  deleteSessionQAConversation(conversationId: number): boolean {
+    const db = this.getDb()
+    const now = Date.now()
+    const result = db.prepare(`
+      UPDATE qa_conversations
+      SET deleted_at = ?, updated_at = ?
+      WHERE id = ? AND deleted_at IS NULL
+    `).run(now, now, conversationId)
+
+    return result.changes > 0
+  }
+
+  saveSessionQAMessage(input: {
+    conversationId: number
+    role: 'user' | 'assistant'
+    content: string
+    thinkContent?: string
+    error?: string
+    result?: SessionQAResult
+    evidenceRefs?: SummaryEvidenceRef[]
+    toolCalls?: SessionQAToolCall[]
+    tokensUsed?: number
+    cost?: number
+    provider?: string
+    model?: string
+    requestId?: string
+    createdAt?: number
+  }): number {
+    const db = this.getDb()
+    const createdAt = input.createdAt || Date.now()
+    const result = db.prepare(`
+      INSERT INTO qa_messages (
+        conversation_id, role, content, think_content, error,
+        result_json, evidence_refs_json, tool_calls_json,
+        tokens_used, cost, provider, model, request_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.conversationId,
+      input.role,
+      input.content || '',
+      input.thinkContent || null,
+      input.error || null,
+      input.result ? JSON.stringify(input.result) : null,
+      input.evidenceRefs ? JSON.stringify(input.evidenceRefs) : null,
+      input.toolCalls ? JSON.stringify(input.toolCalls) : null,
+      input.tokensUsed ?? null,
+      input.cost ?? null,
+      input.provider || null,
+      input.model || null,
+      input.requestId || null,
+      createdAt
+    )
+
+    db.prepare(`
+      UPDATE qa_conversations
+      SET
+        provider = COALESCE(?, provider),
+        model = COALESCE(?, model),
+        updated_at = ?,
+        last_message_at = ?
+      WHERE id = ? AND deleted_at IS NULL
+    `).run(
+      input.provider || null,
+      input.model || null,
+      Date.now(),
+      createdAt,
+      input.conversationId
+    )
+
+    return result.lastInsertRowid as number
+  }
+
+  updateSessionQAConversationTitle(
+    conversationId: number,
+    title: string,
+    titleStatus: Extract<SessionQAConversationTitleStatus, 'generated' | 'fallback'>
+  ): boolean {
+    const db = this.getDb()
+    const normalizedTitle = this.normalizeQATitle(title)
+    if (!normalizedTitle) return false
+
+    const result = db.prepare(`
+      UPDATE qa_conversations
+      SET title = ?, title_status = ?, updated_at = ?
+      WHERE id = ?
+        AND deleted_at IS NULL
+        AND title_status != 'manual'
+        AND title_status != 'generated'
+    `).run(normalizedTitle, titleStatus, Date.now(), conversationId)
+
+    return result.changes > 0
+  }
+
   /**
    * 清理过期缓存
    */
@@ -821,6 +1075,72 @@ export class AIDatabase {
       this.db.close()
       this.db = null
     }
+  }
+
+  private mapQAConversationRow(row: any): SessionQAConversationSummary {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      sessionName: row.session_name || undefined,
+      title: row.title || '新对话',
+      titleStatus: (row.title_status || 'pending') as SessionQAConversationTitleStatus,
+      linkedSummaryId: row.linked_summary_id ?? undefined,
+      provider: row.provider || undefined,
+      model: row.model || undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      lastMessageAt: row.last_message_at,
+      messageCount: row.message_count || 0,
+      lastMessagePreview: this.compactQAPreview(row.last_message_preview)
+    }
+  }
+
+  private mapQAMessageRow(row: any): SessionQAMessageRecord {
+    const result = this.parseJson<SessionQAResult>(row.result_json)
+    const evidenceRefs = this.parseJson<SummaryEvidenceRef[]>(row.evidence_refs_json)
+    const toolCalls = this.parseJson<SessionQAToolCall[]>(row.tool_calls_json)
+
+    return {
+      id: row.id,
+      conversationId: row.conversation_id,
+      role: row.role === 'assistant' ? 'assistant' : 'user',
+      content: row.content || '',
+      thinkContent: row.think_content || undefined,
+      error: row.error || undefined,
+      result: result || undefined,
+      evidenceRefs: evidenceRefs || result?.evidenceRefs,
+      toolCalls: toolCalls || result?.toolCalls,
+      tokensUsed: row.tokens_used ?? undefined,
+      cost: row.cost ?? undefined,
+      provider: row.provider || undefined,
+      model: row.model || undefined,
+      requestId: row.request_id || undefined,
+      createdAt: row.created_at
+    }
+  }
+
+  private parseJson<T>(rawValue: unknown): T | null {
+    if (!rawValue || typeof rawValue !== 'string') return null
+    try {
+      return JSON.parse(rawValue) as T
+    } catch {
+      return null
+    }
+  }
+
+  private compactQAPreview(value?: string | null, limit = 80): string | undefined {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim()
+    if (!normalized) return undefined
+    return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized
+  }
+
+  private normalizeQATitle(value?: string): string {
+    return String(value || '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/^[\s"'“”‘’「」『』《》【】\[\]()（）]+|[\s"'“”‘’「」『』《》【】\[\]()（）。.!！?？,，;；:：]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 32)
   }
 
   private parseStructuredAnalysisColumn(rawValue: unknown): StructuredAnalysis | undefined {

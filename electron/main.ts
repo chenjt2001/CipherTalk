@@ -4022,6 +4022,60 @@ function registerIpcHandlers() {
     }
   })
 
+  ipcMain.handle('ai:listSessionQAConversations', async (_, sessionId: string, limit?: number) => {
+    try {
+      const { aiService } = await import('./services/ai/aiService')
+      return { success: true, conversations: aiService.listSessionQAConversations(sessionId, limit) }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('ai:getSessionQAConversation', async (_, conversationId: number) => {
+    try {
+      const { aiService } = await import('./services/ai/aiService')
+      const conversation = aiService.getSessionQAConversation(conversationId)
+      return conversation
+        ? { success: true, conversation }
+        : { success: false, error: '问答会话不存在或已删除' }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('ai:createSessionQAConversation', async (_, options: {
+    sessionId: string
+    sessionName?: string
+    linkedSummaryId?: number
+  }) => {
+    try {
+      const { aiService } = await import('./services/ai/aiService')
+      return { success: true, conversation: aiService.createSessionQAConversation(options) }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('ai:renameSessionQAConversation', async (_, conversationId: number, title: string) => {
+    try {
+      const { aiService } = await import('./services/ai/aiService')
+      const success = aiService.renameSessionQAConversation(conversationId, title)
+      return { success }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('ai:deleteSessionQAConversation', async (_, conversationId: number) => {
+    try {
+      const { aiService } = await import('./services/ai/aiService')
+      const success = aiService.deleteSessionQAConversation(conversationId)
+      return { success }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
   ipcMain.handle('ai:deleteSummary', async (_, id: number) => {
     try {
       const { aiService } = await import('./services/ai/aiService')
@@ -4242,6 +4296,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('ai:startSessionQuestion', async (event, options: {
     requestId?: string
+    conversationId?: number
     sessionId: string
     sessionName?: string
     question: string

@@ -143,6 +143,46 @@ export interface SessionQAHistoryMessage {
   content: string
 }
 
+export type SessionQAConversationTitleStatus = 'pending' | 'generated' | 'fallback' | 'manual'
+
+export interface SessionQAMessageRecord {
+  id: number
+  conversationId: number
+  role: 'user' | 'assistant'
+  content: string
+  thinkContent?: string
+  error?: string
+  result?: SessionQAResult
+  evidenceRefs?: SummaryEvidenceRef[]
+  toolCalls?: SessionQAToolCall[]
+  tokensUsed?: number
+  cost?: number
+  provider?: string
+  model?: string
+  requestId?: string
+  createdAt: number
+}
+
+export interface SessionQAConversationSummary {
+  id: number
+  sessionId: string
+  sessionName?: string
+  title: string
+  titleStatus: SessionQAConversationTitleStatus
+  linkedSummaryId?: number
+  provider?: string
+  model?: string
+  createdAt: number
+  updatedAt: number
+  lastMessageAt: number
+  messageCount: number
+  lastMessagePreview?: string
+}
+
+export interface SessionQAConversationDetail extends SessionQAConversationSummary {
+  messages: SessionQAMessageRecord[]
+}
+
 export type SessionQARequestId = string
 
 export interface SessionQAToolCall {
@@ -202,6 +242,7 @@ export interface SessionQAJobEvent {
 export interface SessionQAStartResult {
   success: boolean
   requestId?: SessionQARequestId
+  conversationId?: number
   error?: string
 }
 

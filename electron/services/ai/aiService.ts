@@ -42,6 +42,10 @@ import {
   type SessionQAProgressEvent,
   type SessionQAToolCall
 } from '../ai-agent/qa/sessionQaAgent'
+import type {
+  SessionQAConversationDetail,
+  SessionQAConversationSummary
+} from '../../../src/types/ai'
 
 /**
  * 摘要选项
@@ -85,6 +89,7 @@ export interface SummaryResult {
 }
 
 export interface SessionQAOptions {
+  conversationId?: number
   sessionId: string
   sessionName?: string
   question: string
@@ -239,6 +244,22 @@ class AIService {
       default:
         throw new Error(`不支持的提供商: ${name}`)
     }
+  }
+
+  private normalizeGeneratedQATitle(value?: string): string {
+    return String(value || '')
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/^[\s"'“”‘’「」『』《》【】\[\]()（）]+|[\s"'“”‘’「」『』《》【】\[\]()（）。.!！?？,，;；:：]+$/g, '')
+      .replace(/\s+/g, '')
+      .trim()
+      .slice(0, 24)
+  }
+
+  private buildFallbackQATitle(question?: string): string {
+    const normalized = this.normalizeGeneratedQATitle(question)
+    if (!normalized) return '新对话'
+    return normalized.length > 16 ? normalized.slice(0, 16) : normalized
   }
 
   /**
@@ -614,6 +635,129 @@ ${detailInstructions[detail as keyof typeof detailInstructions] || detailInstruc
       totalTokens,
       totalCost,
       details: rawStats
+    }
+  }
+
+  listSessionQAConversations(sessionId: string, limit?: number): SessionQAConversationSummary[] {
+    if (!this.initialized) {
+      this.init()
+    }
+    return aiDatabase.listSessionQAConversations(sessionId, limit)
+  }
+
+  getSessionQAConversation(conversationId: number): SessionQAConversationDetail | null {
+    if (!this.initialized) {
+      this.init()
+    }
+    return aiDatabase.getSessionQAConversation(conversationId)
+  }
+
+  createSessionQAConversation(input: {
+    sessionId: string
+    sessionName?: string
+    linkedSummaryId?: number
+    provider?: string
+    model?: string
+  }): SessionQAConversationSummary {
+    if (!this.initialized) {
+      this.init()
+    }
+    return aiDatabase.createSessionQAConversation(input)
+  }
+
+  renameSessionQAConversation(conversationId: number, title: string): boolean {
+    if (!this.initialized) {
+      this.init()
+    }
+    return aiDatabase.renameSessionQAConversation(conversationId, title)
+  }
+
+  deleteSessionQAConversation(conversationId: number): boolean {
+    if (!this.initialized) {
+      this.init()
+    }
+    return aiDatabase.deleteSessionQAConversation(conversationId)
+  }
+
+  saveSessionQAMessage(input: {
+    conversationId: number
+    role: 'user' | 'assistant'
+    content: string
+    thinkContent?: string
+    error?: string
+    result?: SessionQAResult
+    evidenceRefs?: any[]
+    toolCalls?: SessionQAToolCall[]
+    tokensUsed?: number
+    cost?: number
+    provider?: string
+    model?: string
+    requestId?: string
+    createdAt?: number
+  }): number {
+    if (!this.initialized) {
+      this.init()
+    }
+    return aiDatabase.saveSessionQAMessage(input)
+  }
+
+  async generateSessionQAConversationTitle(options: {
+    conversationId: number
+    provider?: string
+    apiKey?: string
+    model?: string
+  }): Promise<{ title: string; status: 'generated' | 'fallback' }> {
+    if (!this.initialized) {
+      this.init()
+    }
+
+    const conversation = aiDatabase.getSessionQAConversation(options.conversationId)
+    if (!conversation || conversation.titleStatus === 'manual' || conversation.titleStatus === 'generated') {
+      return { title: conversation?.title || '新对话', status: 'fallback' }
+    }
+
+    const firstUser = conversation.messages.find(message => message.role === 'user' && message.content.trim())
+    const firstAssistant = conversation.messages.find(message => message.role === 'assistant' && message.content.trim() && !message.error)
+    if (!firstUser || !firstAssistant) {
+      const fallback = this.buildFallbackQATitle(firstUser?.content || conversation.title)
+      aiDatabase.updateSessionQAConversationTitle(options.conversationId, fallback, 'fallback')
+      return { title: fallback, status: 'fallback' }
+    }
+
+    try {
+      const provider = this.getProvider(options.provider || conversation.provider, options.apiKey)
+      const model = options.model || conversation.model || provider.models[0]
+      const rawTitle = await provider.chat([
+        {
+          role: 'system',
+          content: '你是聊天标题生成器。只输出一个中文短标题，8到16个汉字，不要引号，不要换行，不要解释，不要标点包装。'
+        },
+        {
+          role: 'user',
+          content: [
+            '请根据下面这轮问答生成标题。',
+            `用户问题：${firstUser.content.slice(0, 600)}`,
+            `AI回答：${firstAssistant.content.slice(0, 900)}`
+          ].join('\n')
+        }
+      ], {
+        model,
+        temperature: 0.2,
+        maxTokens: 32,
+        enableThinking: false
+      })
+
+      const title = this.normalizeGeneratedQATitle(rawTitle) || this.buildFallbackQATitle(firstUser.content)
+      const status = title === this.buildFallbackQATitle(firstUser.content) && !this.normalizeGeneratedQATitle(rawTitle)
+        ? 'fallback'
+        : 'generated'
+      aiDatabase.updateSessionQAConversationTitle(options.conversationId, title, status)
+      return { title, status }
+    } catch (error) {
+      console.warn('[AI] 问答会话标题生成失败，使用兜底标题:', error)
+      const fallback = this.buildFallbackQATitle(firstUser.content)
+      aiDatabase.updateSessionQAConversationTitle(options.conversationId, fallback, 'fallback')
+      return { title: fallback, status: 'fallback' }
     }
   }
 
