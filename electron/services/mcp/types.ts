@@ -381,6 +381,18 @@ export interface McpSearchVectorStatus {
   error?: string
 }
 
+export interface McpSearchRerankStatus {
+  requested: boolean
+  attempted: boolean
+  enabled: boolean
+  modelAvailable: boolean
+  candidateCount: number
+  rerankedCount: number
+  model?: string
+  skippedReason?: string
+  error?: string
+}
+
 export interface McpSearchMessagesPayload {
   hits: McpSearchHit[]
   limit: number
@@ -395,6 +407,7 @@ export interface McpSearchMessagesPayload {
     error?: string
   }
   vectorSearch?: McpSearchVectorStatus
+  rerank?: McpSearchRerankStatus
   sessionSummaries?: Array<{
     session: McpSessionRef
     hitCount: number

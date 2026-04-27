@@ -1409,6 +1409,7 @@ async function searchSessionMessages(sessionId: string, query: string, filters: 
     limit: filters.limit || MAX_SEARCH_HITS,
     matchMode: 'substring',
     includeRaw: false,
+    rerank: true,
     ...(filters.senderUsername ? { senderUsername: filters.senderUsername } : {}),
     ...(filters.startTime ? { startTime: filters.startTime } : {}),
     ...(filters.endTime ? { endTime: filters.endTime } : {})

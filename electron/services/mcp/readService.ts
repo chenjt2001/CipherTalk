@@ -9,6 +9,7 @@ import { exportService, type ExportOptions as ExportServiceOptions } from '../ex
 import { groupAnalyticsService } from '../groupAnalyticsService'
 import { imageDecryptService } from '../imageDecryptService'
 import { snsService } from '../snsService'
+import { localRerankerService, type RerankDocument } from '../retrieval/rerankerService'
 import { chatSearchIndexService } from '../search/chatSearchIndexService'
 import { videoService } from '../videoService'
 import { McpToolError } from './result'
@@ -44,6 +45,7 @@ import {
   type McpSearchHit,
   type McpSearchMessagesPayload,
   type McpSearchRetrievalSource,
+  type McpSearchRerankStatus,
   type McpSearchVectorStatus,
   type McpResolveSessionPayload,
   type McpResolvedSessionCandidate,
@@ -67,6 +69,7 @@ const MAX_TARGETED_SCAN_GLOBAL = 200000
 const MAX_STATISTICS_SCAN_MESSAGES = 200000
 const STATISTICS_SCAN_BATCH_SIZE = 1000
 const MAX_STATISTICS_SAMPLES = 5
+const MAX_RERANK_CANDIDATES = 120
 
 const listSessionsArgsSchema = z.object({
   q: z.string().optional(),
@@ -139,7 +142,8 @@ const searchMessagesArgsSchema = z.object({
   matchMode: z.enum(['substring', 'exact']).optional(),
   limit: z.number().int().positive().optional(),
   includeRaw: z.boolean().optional(),
-  includeMediaPaths: z.boolean().optional()
+  includeMediaPaths: z.boolean().optional(),
+  rerank: z.boolean().optional()
 })
 
 const analyticsTimeRangeArgsSchema = z.object({
@@ -392,6 +396,28 @@ function compactText(value: string, limit: number): string {
   const normalized = String(value || '').replace(/\s+/g, ' ').trim()
   if (!normalized) return ''
   return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized
+}
+
+function buildRerankDocumentText(hit: SearchRawHit): string {
+  const message = hit.message
+  const text = compactText(String(message.parsedContent || hit.excerpt || message.rawContent || ''), 1200)
+  const raw = text ? '' : compactText(String(message.rawContent || ''), 400)
+  const sender = message.isSend ? 'self' : (message.senderUsername || 'unknown')
+  const timestampMs = toTimestampMs(Number(message.createTime || 0))
+  const timestamp = timestampMs ? new Date(timestampMs).toISOString() : 'unknown'
+  return [
+    `session: ${hit.session.displayName || hit.session.sessionId}`,
+    `time: ${timestamp}`,
+    `direction: ${message.isSend ? 'out' : 'in'}`,
+    `sender: ${sender}`,
+    `source: ${hit.retrievalSource || 'unknown'}`,
+    `excerpt: ${compactText(hit.excerpt || text || raw, 400)}`,
+    `message: ${text || raw}`
+  ].filter(Boolean).join('\n')
+}
+
+function buildRerankDocumentId(hit: SearchRawHit): string {
+  return `${hit.session.sessionId}:${hit.message.localId}:${hit.message.createTime}:${hit.message.sortSeq}`
 }
 
 function buildTimeRange(startTime?: number, endTime?: number) {
@@ -2467,6 +2493,8 @@ export class McpReadService {
         let indexedMessages = 0
         let indexedTruncated = false
         const semanticQuery = args.data.semanticQuery || args.data.query
+        const rerankEnabled = args.data.rerank ?? localRerankerService.isEnabled()
+        const rerankerProfile = localRerankerService.getProfile()
         const vectorSearch: McpSearchVectorStatus = {
           requested: matchMode !== 'exact' && Boolean(semanticQuery),
           attempted: false,
@@ -2475,6 +2503,15 @@ export class McpReadService {
           hitCount: 0,
           indexedMessages: 0,
           vectorizedMessages: 0
+        }
+        const rerank: McpSearchRerankStatus = {
+          requested: rerankEnabled && matchMode !== 'exact' && Boolean(semanticQuery),
+          attempted: false,
+          enabled: rerankEnabled,
+          modelAvailable: false,
+          candidateCount: 0,
+          rerankedCount: 0,
+          model: rerankerProfile.displayName
         }
         const vectorSkippedReasons = new Set<string>()
         const vectorErrors = new Set<string>()
@@ -2603,7 +2640,61 @@ export class McpReadService {
 
         indexedRawHits.push(...indexedRawHitMap.values())
         indexedRawHits.sort((a, b) => b.score - a.score || compareMessageCursorDesc(a.message, b.message))
-        const hits = await Promise.all(indexedRawHits.slice(0, limit).map(async (hit): Promise<McpSearchHit> => ({
+
+        let rankedIndexedRawHits = indexedRawHits
+        if (!rerank.requested) {
+          rerank.skippedReason = !rerank.enabled ? 'rerank_disabled' : (matchMode === 'exact' ? 'exact_match_mode' : 'empty_semantic_query')
+        } else if (indexedRawHits.length === 0) {
+          rerank.skippedReason = 'no_candidates'
+        } else {
+          const candidateCount = Math.min(indexedRawHits.length, Math.max(limit * 6, limit + 20), MAX_RERANK_CANDIDATES)
+          rerank.candidateCount = candidateCount
+          try {
+            const rerankerStatus = await localRerankerService.getModelStatus(rerankerProfile.id)
+            rerank.modelAvailable = rerankerStatus.exists
+            if (!rerankerStatus.exists) {
+              rerank.skippedReason = 'reranker_model_not_downloaded'
+            } else {
+              rerank.attempted = true
+              const candidateHits = indexedRawHits.slice(0, candidateCount)
+              const hitById = new Map(candidateHits.map((hit) => [buildRerankDocumentId(hit), hit]))
+              const documents: RerankDocument[] = candidateHits.map((hit) => ({
+                id: buildRerankDocumentId(hit),
+                text: buildRerankDocumentText(hit),
+                originalScore: hit.score
+              }))
+              const reranked = await localRerankerService.rerank(semanticQuery, documents, {
+                profileId: rerankerProfile.id,
+                limit: candidateCount
+              })
+              const rerankedIds = new Set<string>()
+              const rerankedHits = reranked
+                .map((item) => {
+                  const hit = hitById.get(item.id)
+                  if (!hit) return null
+                  rerankedIds.add(item.id)
+                  return {
+                    ...hit,
+                    score: item.combinedScore
+                  } satisfies SearchRawHit
+                })
+                .filter((hit): hit is SearchRawHit => Boolean(hit))
+              const candidateRemainder = candidateHits.filter((hit) => !rerankedIds.has(buildRerankDocumentId(hit)))
+              const tailHits = indexedRawHits.slice(candidateCount)
+              rankedIndexedRawHits = [
+                ...rerankedHits,
+                ...candidateRemainder,
+                ...tailHits
+              ]
+              rerank.rerankedCount = rerankedHits.length
+            }
+          } catch (error) {
+            rerank.error = compactText(String(error), 160)
+            console.warn('[McpReadService] Local rerank failed, keeping recall order:', error)
+          }
+        }
+
+        const hits = await Promise.all(rankedIndexedRawHits.slice(0, limit).map(async (hit): Promise<McpSearchHit> => ({
           session: hit.session,
           message: await normalizeMessage(hit.session.sessionId, hit.message, {
             includeMediaPaths,
@@ -2629,7 +2720,8 @@ export class McpReadService {
             indexedSessions: targetSessions.length,
             indexedMessages
           },
-          vectorSearch
+          vectorSearch,
+          rerank
         })
 
         return {
@@ -2645,7 +2737,8 @@ export class McpReadService {
             indexedSessions: targetSessions.length,
             indexedMessages
           },
-          vectorSearch
+          vectorSearch,
+          rerank
         }
       } catch (error) {
         console.warn('[McpReadService] Indexed search failed, falling back to scan:', error)

@@ -207,6 +207,18 @@ const searchVectorStatusSchema = z.object({
   error: z.string().optional()
 }).passthrough()
 
+const searchRerankStatusSchema = z.object({
+  requested: z.boolean(),
+  attempted: z.boolean(),
+  enabled: z.boolean(),
+  modelAvailable: z.boolean(),
+  candidateCount: z.number(),
+  rerankedCount: z.number(),
+  model: z.string().optional(),
+  skippedReason: z.string().optional(),
+  error: z.string().optional()
+}).passthrough()
+
 const participantStatisticsSchema = z.object({
   senderUsername: z.string().nullable(),
   displayName: z.string(),
@@ -316,6 +328,7 @@ export const toolOutputSchemas = {
       error: z.string().optional()
     }).optional(),
     vectorSearch: searchVectorStatusSchema.optional(),
+    rerank: searchRerankStatusSchema.optional(),
     sessionSummaries: z.array(searchSessionSummarySchema).optional()
   }).passthrough(),
   get_session_context: z.object({
@@ -456,7 +469,11 @@ function buildSearchPreview(payload: McpSearchMessagesPayload): string {
   const vectorSummary = vector
     ? ` Vector=${vector.attempted ? `called, hits=${vector.hitCount}` : `not called${vector.skippedReason ? `, reason=${vector.skippedReason}` : ''}`}.`
     : ''
-  const summary = `Loaded ${payload.hits.length} message hits.${vectorSummary}`
+  const rerank = payload.rerank
+  const rerankSummary = rerank
+    ? ` Rerank=${rerank.attempted ? `called, candidates=${rerank.rerankedCount}` : `not called${rerank.skippedReason ? `, reason=${rerank.skippedReason}` : ''}`}.`
+    : ''
+  const summary = `Loaded ${payload.hits.length} message hits.${vectorSummary}${rerankSummary}`
   const lines = payload.hits.slice(0, PREVIEW_LIMIT).map((hit, index) => buildSearchHitLine(hit, index))
   return `${summary}${previewLines(lines)}`
 }
