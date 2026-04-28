@@ -119,9 +119,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('accounts:delete', accountId, deleteLocalData) as Promise<{ success: boolean; error?: string; deleted?: AccountProfile | null; nextActiveAccountId?: string }>
   },
 
-  skillInstaller: {
-    exportSkillZip: (skillName: string) =>
-      ipcRenderer.invoke('skillInstaller:exportSkillZip', skillName) as Promise<{ success: boolean; outputPath?: string; fileName?: string; version?: string; error?: string }>
+  skillManager: {
+    list: () => ipcRenderer.invoke('skillManager:list') as Promise<Array<{ name: string; version: string; description: string; builtin: boolean }>>,
+    readContent: (skillName: string) => ipcRenderer.invoke('skillManager:readContent', skillName) as Promise<{ success: boolean; content?: string; error?: string }>,
+    updateContent: (skillName: string, content: string) => ipcRenderer.invoke('skillManager:updateContent', skillName, content) as Promise<{ success: boolean; error?: string }>,
+    exportZip: (skillName: string) => ipcRenderer.invoke('skillManager:exportZip', skillName) as Promise<{ success: boolean; outputPath?: string; fileName?: string; version?: string; error?: string }>,
+    importZip: (zipPath: string) => ipcRenderer.invoke('skillManager:importZip', zipPath) as Promise<{ success: boolean; skillName?: string; error?: string }>,
+    delete: (skillName: string) => ipcRenderer.invoke('skillManager:delete', skillName) as Promise<{ success: boolean; error?: string }>,
+    create: (skillName: string, content: string) => ipcRenderer.invoke('skillManager:create', skillName, content) as Promise<{ success: boolean; error?: string }>,
+  },
+
+  mcpClient: {
+    listConfigs: () => ipcRenderer.invoke('mcpClient:listConfigs') as Promise<Record<string, { type: string; command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; url?: string; headers?: Record<string, string>; timeoutMs?: number; autoConnect?: boolean }>>,
+    saveConfig: (name: string, config: any, overwrite?: boolean) => ipcRenderer.invoke('mcpClient:saveConfig', name, config, overwrite) as Promise<{ success: boolean; error?: string }>,
+    deleteConfig: (name: string) => ipcRenderer.invoke('mcpClient:deleteConfig', name) as Promise<{ success: boolean; error?: string }>,
+    connect: (name: string) => ipcRenderer.invoke('mcpClient:connect', name) as Promise<{ success: boolean; tools?: Array<{ name: string; description?: string }>; error?: string }>,
+    disconnect: (name: string) => ipcRenderer.invoke('mcpClient:disconnect', name) as Promise<{ success: boolean; error?: string }>,
+    listTools: (name: string) => ipcRenderer.invoke('mcpClient:listTools', name) as Promise<{ success: boolean; tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>; error?: string }>,
+    callTool: (name: string, toolName: string, args: any) => ipcRenderer.invoke('mcpClient:callTool', name, toolName, args) as Promise<{ success: boolean; result?: any; error?: string }>,
+    listStatuses: () => ipcRenderer.invoke('mcpClient:listStatuses') as Promise<Array<{ name: string; config: any; status: string; toolCount: number; error?: string }>>,
   },
 
   // 数据库操作

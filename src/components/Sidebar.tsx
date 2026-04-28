@@ -83,7 +83,7 @@ function Sidebar() {
     { key: 'export', label: '导出数据', icon: <Download size={20} />, type: 'route', path: '/export' },
     { key: 'data-management', label: '数据管理', icon: <Database size={20} />, type: 'route', path: '/data-management' },
     { key: 'open-api', label: '开放接口', icon: <Network size={20} />, type: 'route', path: '/open-api' },
-    { key: 'mcp', label: 'MCP 服务', icon: <MCP size={20} />, type: 'route', path: '/mcp' },
+    { key: 'mcp', label: 'MCP & Skills', icon: <MCP size={20} />, type: 'route', path: '/mcp' },
   ]
 
   const navItemSx = {
