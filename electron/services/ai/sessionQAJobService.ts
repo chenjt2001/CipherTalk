@@ -11,6 +11,7 @@ import type {
 import type { SessionQAOptions } from './aiService'
 import { dataManagementService } from '../dataManagementService'
 import { aiService } from './aiService'
+import { getElectronWorkerEnv } from '../workerEnvironment'
 
 type SessionQAJob = {
   requestId: string
@@ -78,6 +79,7 @@ class SessionQAJobService {
     })
 
     const worker = new Worker(workerPath, {
+      env: getElectronWorkerEnv(),
       workerData: {
         requestId,
         options: workerOptions
@@ -308,6 +310,7 @@ class SessionQAJobService {
     if (!workerPath) return
 
     const worker = new Worker(workerPath, {
+      env: getElectronWorkerEnv(),
       workerData: { sessionId }
     })
     this.vectorWarmupJobs.set(sessionId, worker)

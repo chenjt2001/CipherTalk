@@ -177,8 +177,8 @@ export type ToolLoopAction =
 
 export type AutonomousAgentAction =
   | { action: 'assistant_text'; content: string }
-  | { action: 'tool_call'; tool: ToolLoopAction; reason?: string }
-  | { action: 'final_answer'; content?: string; reason?: string }
+  | { action: 'tool_call'; tool: ToolLoopAction; reason?: string; assistantText?: string }
+  | { action: 'final_answer'; content?: string; reason?: string; assistantText?: string }
 
 export type EvidenceQuality = 'none' | 'weak' | 'sufficient'
 

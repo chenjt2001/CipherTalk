@@ -37,6 +37,34 @@ function buildAvailableToolSchemaText(): string {
    对已读取消息做聚合整理。`
 }
 
+function buildOutputFormatText(): string {
+  // 使用 JSON.stringify 生成正确的 JSON 示例，避免手动转义
+  const example1 = JSON.stringify({
+    action: 'tool_call',
+    toolName: 'search_messages',
+    args: { query: '关键词' },
+    reason: '为什么调用',
+    assistantText: '我先查一下相关记录。'
+  })
+  const example2 = JSON.stringify({
+    action: 'final_answer',
+    content: '最终回答文本',
+    reason: '为什么现在可以回答'
+  })
+  const example3 = JSON.stringify({
+    action: 'tool_call',
+    toolName: 'search_messages',
+    args: { query: '关键词' },
+    reason: '为什么调用'
+  })
+  return `输出格式必须是严格 JSON，推荐以下格式：
+1. ${example1}
+2. ${example2}
+3. ${example3}
+
+注意：如果你想给用户一句进度文字（如"好的，我来查一下"），请把它写在 tool_call 的 assistantText 字段中，不要单独用 assistant_text。这样可以一步完成"说话+调工具"。`
+}
+
 export interface BuildDecisionPromptInput {
   sessionName: string
   question: string
@@ -68,7 +96,7 @@ export function buildAutonomousAgentPrompt(input: BuildDecisionPromptInput): str
     : '无'
   const searchHints = input.route.searchQueries.join('、') || '无'
 
-  return `你是 CipherTalk 的本地聊天记录问答 Agent。你要自主决定下一步：输出一小段文字、调用一个本地工具，或给出最终答案。
+  return `你是 CipherTalk 的本地聊天记录问答 Agent。你要自主决定下一步：调用一个本地工具，或给出最终答案。
 
 当前时间：${formatTime(Date.now())}
 会话：${input.sessionName}
@@ -116,13 +144,10 @@ ${buildObservationText(input.observations)}
 
 ${buildAvailableToolSchemaText()}
 
-输出格式必须是严格 JSON，只能三选一：
-1. {"action":"assistant_text","content":"我先查一下相关记录。"}
-2. {"action":"tool_call","toolName":"search_messages","args":{"query":"关键词"},"reason":"为什么调用"}
-3. {"action":"final_answer","content":"最终回答文本","reason":"为什么现在可以回答"}
+${buildOutputFormatText()}
 
 决策规则：
-- 可以先用 assistant_text 给用户一句自然的进度文字，然后继续调用工具。
+- 优先使用带 assistantText 的 tool_call，一步完成进度提示和工具调用。不要使用独立的 assistant_text 动作。
 - 寒暄、感谢、能力询问等不需要聊天记录的问题，可以直接 final_answer，不要调用工具。
 - 事实类、证据类、原话类、是否提到某词、统计类问题，必须先有证据再 final_answer。
 - 证据质量为 none 时，不要 final_answer；优先 search_messages、get_session_statistics、get_keyword_statistics、read_by_time_range 或 read_summary_facts。例外：工具观察明确为 content_not_found 时，应 final_answer 说明证据不足。

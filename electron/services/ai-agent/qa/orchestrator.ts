@@ -10,7 +10,8 @@ import type {
   SessionQAAgentResult,
   ToolLoopAction,
   ContextWindow,
-  SessionQAToolCall
+  SessionQAToolCall,
+  IntentRoute
 } from './types'
 import {
   MAX_CONTEXT_MESSAGES,
@@ -239,8 +240,18 @@ async function executeAggregateMessages(ctx: AgentContext, action: ToolLoopActio
 async function executeSearchMessages(ctx: AgentContext, action: ToolLoopAction & { action: 'search_messages' }) {
   const query = normalizeSearchQuery(action.query, 48)
   const queryKey = query.toLowerCase()
-  if (!query || ctx.searchedQueries.has(queryKey)) {
-    ctx.observations.push({ title: '跳过重复检索', detail: query ? `关键词"${query}"已检索过。` : '模型给出的关键词为空。' })
+  if (!query) {
+    ctx.toolCallsUsed += 1
+    const progressId = `tool-loop-${ctx.toolCallsUsed}-search`
+    emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'failed', title: '搜索相关消息', detail: '搜索查询为空。', toolName: 'search_messages', query })
+    ctx.observations.push({ title: '搜索参数错误', detail: '搜索查询为空。' })
+    return
+  }
+  if (ctx.searchedQueries.has(queryKey)) {
+    ctx.toolCallsUsed += 1
+    const progressId = `tool-loop-${ctx.toolCallsUsed}-search`
+    emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '搜索相关消息', detail: `已跳过重复关键词：${query}`, toolName: 'search_messages', query, count: 0 })
+    ctx.observations.push({ title: '跳过重复搜索', detail: `关键词 "${query}" 已经搜索过，请更换关键词，或进入 final_answer。` })
     return
   }
 
@@ -270,7 +281,6 @@ async function executeSearchMessages(ctx: AgentContext, action: ToolLoopAction &
       for (const w of search.contextWindows) {
         ctx.contextWindows.push(w)
         ctx.addContextEvidence(w.messages)
-        if (w.anchor) ctx.readContextKeys.add(getMessageCursorKey(w.anchor))
       }
     }
     emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '搜索相关消息', detail: `关键词：${query}，命中 ${search.payload?.hits.length || 0} 条`, toolName: 'search_messages', query, count: search.payload?.hits.length || 0, diagnostics: [...(search.diagnostics || []), ...getSearchDiagnostics(search.payload)] })
@@ -311,16 +321,21 @@ async function executeSearchMessages(ctx: AgentContext, action: ToolLoopAction &
 async function executeReadContext(ctx: AgentContext, action: ToolLoopAction & { action: 'read_context' }) {
   const target = findKnownHitForAction(action, ctx.knownHits)
   if (!target) {
+    ctx.toolCallsUsed += 1
+    const progressId = `tool-loop-${ctx.toolCallsUsed}-context`
+    emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'failed', title: '读取命中上下文', detail: '没有可读取的搜索命中', toolName: 'read_context' })
     ctx.observations.push({ title: '读取命中上下文', detail: '没有可读取的搜索命中，请先搜索。' })
     return
   }
   const contextKey = getMessageCursorKey(target.message)
   if (ctx.readContextKeys.has(contextKey)) {
-    ctx.observations.push({ title: '跳过重复上下文', detail: `${target.hitId} 已读取过前后文。` })
+    ctx.toolCallsUsed += 1
+    const progressId = `tool-loop-${ctx.toolCallsUsed}-context`
+    emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '读取命中上下文', detail: `已跳过重复命中：${target.hitId}`, toolName: 'read_context', count: 0 })
+    ctx.observations.push({ title: '跳过重复上下文', detail: `${target.hitId} 已读取过前后文。请选择其他 hitId，或进行最终回答。` })
     return
   }
 
-  ctx.readContextKeys.add(contextKey)
   ctx.toolCallsUsed += 1
   const beforeLimit = clampToolLimit(action.beforeLimit, SEARCH_CONTEXT_BEFORE, 12)
   const afterLimit = clampToolLimit(action.afterLimit, SEARCH_CONTEXT_AFTER, 12)
@@ -332,6 +347,9 @@ async function executeReadContext(ctx: AgentContext, action: ToolLoopAction & { 
     const context = await loadContextAroundMessage(ctx.sessionId, target.message, beforeLimit, afterLimit)
     if (context.toolCall) ctx.toolCalls.push(context.toolCall)
     const messages = context.payload?.items || []
+    if (messages.length > 0) {
+      ctx.readContextKeys.add(contextKey)
+    }
     ctx.contextWindows.push({ source: 'search', query: target.query, anchor: target.message, messages })
     for (const m of messages) {
       const ref = toEvidenceRef(ctx.sessionId, m)
@@ -347,6 +365,13 @@ async function executeReadContext(ctx: AgentContext, action: ToolLoopAction & { 
 
 async function executeReadLatest(ctx: AgentContext, action: ToolLoopAction & { action: 'read_latest' }) {
   ctx.usedRecentFallback = true
+  if (ctx.contextWindows.some((w) => w.source === 'latest')) {
+    ctx.toolCallsUsed += 1
+    const progressId = `tool-loop-${ctx.toolCallsUsed}-latest`
+    emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '读取最近上下文', detail: '已跳过重复读取', toolName: 'read_latest', count: 0 })
+    ctx.observations.push({ title: '跳过重复读取', detail: '已读取过最近上下文，请进入 final_answer 进行回答。' })
+    return
+  }
   ctx.toolCallsUsed += 1
   const latestLimit = clampToolLimit(action.limit, MAX_CONTEXT_MESSAGES, MAX_CONTEXT_MESSAGES)
   const progressId = `tool-loop-${ctx.toolCallsUsed}-latest`
@@ -387,6 +412,54 @@ async function dispatchToolAction(ctx: AgentContext, action: ToolLoopAction): Pr
   }
 }
 
+// ─── assistant_text 自动推进：根据当前状态选择下一个工具 ────────
+
+/**
+ * 当模型输出纯 assistant_text 时，根据当前 Agent 状态自动选择一个合理的工具执行，
+ * 避免 continue 空转导致重复输出。
+ *
+ * 选择策略按优先级：
+ * 1. 如果启发式路由有未搜索的关键词 → search_messages
+ * 2. 如果还没读过摘要事实 → read_summary_facts
+ * 3. 如果路由有时间范围 → read_by_time_range
+ * 4. 如果路由有参与者线索且未解析 → resolve_participant
+ * 5. 兜底 → read_latest
+ */
+function pickFallbackToolAction(ctx: AgentContext, route: IntentRoute): ToolLoopAction {
+  // 优先用启发式路由建议的搜索关键词
+  const nextSearchQuery = route.searchQueries.find((q) => !ctx.searchedQueries.has(q.toLowerCase()))
+  if (nextSearchQuery && ctx.toolCallsUsed < MAX_TOOL_CALLS - 2) {
+    return { action: 'search_messages', query: nextSearchQuery, reason: '模型输出进度文字，自动执行路由推荐的搜索' }
+  }
+
+  // 还没读过摘要
+  if (!ctx.summaryFactsRead && !ctx.observations.some((o) => o.title === '读取摘要事实')) {
+    return { action: 'read_summary_facts', reason: '模型输出进度文字，自动检查摘要事实' }
+  }
+
+  // 路由有时间范围线索
+  if (route.timeRange && ctx.contextWindows.length === 0) {
+    return {
+      action: 'read_by_time_range',
+      startTime: route.timeRange.startTime,
+      endTime: route.timeRange.endTime,
+      label: route.timeRange.label,
+      reason: '模型输出进度文字，自动按时间范围读取'
+    }
+  }
+
+  // 路由有参与者线索但尚未解析
+  if (route.participantHints.length > 0 && ctx.resolvedParticipants.length === 0) {
+    return { action: 'resolve_participant', name: route.participantHints[0], reason: '模型输出进度文字，自动解析参与者' }
+  }
+
+  if (!ctx.contextWindows.some((w) => w.source === 'latest')) {
+    return { action: 'read_latest', limit: MAX_CONTEXT_MESSAGES, reason: '模型输出进度文字，自动读取最近上下文兜底' }
+  }
+
+  return { action: 'answer', reason: '所有自动探测工具已执行完毕，强制进入总结环节。' }
+}
+
 // ─── 主函数 ──────────────────────────────────────────────────
 
 export async function answerSessionQuestionWithAgent(
@@ -425,17 +498,38 @@ export async function answerSessionQuestionWithAgent(
       }, { decisionMaxTokens: agentDecisionMaxTokens, finalAnswerContentCharLimit })
       ctx.lastAgentPrompt = agentDecision.prompt
 
-      // 处理 assistant_text
-      if (agentDecision.action.action === 'assistant_text') {
+      // ── 辅助：发射 assistantText 思考气泡（如果有的话）──
+      const maybeEmitAssistantText = (text?: string) => {
+        if (!text) return
+        // 去重：和上一条相同内容则不发射
+        const lastThought = ctx.observations.filter((o) => o.title === 'Agent 输出').pop()
+        if (lastThought && lastThought.detail === text) return
         emitProgress(ctx.options, {
           id: `thought-${Date.now()}-${ctx.decisionAttempts}`,
           stage: 'thought',
           status: 'completed',
-          title: agentDecision.action.content,
-          detail: agentDecision.action.content
+          title: text,
+          detail: text
         })
-        ctx.observations.push({ title: 'Agent 输出', detail: agentDecision.action.content })
+        ctx.observations.push({ title: 'Agent 输出', detail: text })
+      }
+
+      // 处理 assistant_text → 不再空转 continue，直接推进到工具调用
+      // 根本原因：模型想表达"说句话+调工具"，但格式限制只能三选一，
+      // 导致它先输出 assistant_text，continue 后上下文几乎没变，又重复同样的输出。
+      // 修复：将 assistant_text 视为"附带进度文字的隐含工具调用"，自动推进。
+      if (agentDecision.action.action === 'assistant_text') {
+        maybeEmitAssistantText(agentDecision.action.content)
+        // 不再 continue 空转。根据当前状态自动选择一个工具执行，确保每轮都有实质推进。
+        const autoAction = pickFallbackToolAction(ctx, route)
+        ctx.observations.push({ title: '自动推进', detail: `模型输出进度文字后自动执行：${autoAction.action}` })
+        await dispatchToolAction(ctx, autoAction)
         continue
+      }
+
+      // tool_call / final_answer 如果携带了 assistantText，先展示
+      if ('assistantText' in agentDecision.action && agentDecision.action.assistantText) {
+        maybeEmitAssistantText(agentDecision.action.assistantText)
       }
 
       // 处理 final_answer

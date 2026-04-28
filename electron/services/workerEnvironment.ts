@@ -1,0 +1,32 @@
+import { app } from 'electron'
+import { delimiter, join } from 'path'
+
+function copyProcessEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string') {
+      env[key] = value
+    }
+  }
+  return env
+}
+
+export function getElectronWorkerEnv(): NodeJS.ProcessEnv {
+  const env = copyProcessEnv()
+  const existingNodePaths = env.NODE_PATH
+    ? env.NODE_PATH.split(delimiter).filter(Boolean)
+    : []
+  const packagedNodePaths = app.isPackaged
+    ? [
+        join(process.resourcesPath, 'app.asar.unpacked', 'node_modules'),
+        join(process.resourcesPath, 'app.asar', 'node_modules'),
+        join(process.resourcesPath, 'node_modules')
+      ]
+    : [
+        join(app.getAppPath(), 'node_modules'),
+        join(process.cwd(), 'node_modules')
+      ]
+
+  env.NODE_PATH = Array.from(new Set([...packagedNodePaths, ...existingNodePaths])).join(delimiter)
+  return env
+}

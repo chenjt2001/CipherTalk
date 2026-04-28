@@ -151,9 +151,21 @@ export function parseAutonomousAgentAction(value: string, finalAnswerContentChar
       if (!text) return undefined
       return text.length > limit ? `${text.slice(0, limit - 3)}...` : text
     }
+    // 提取可选的进度文字（tool_call 和 final_answer 都可携带）
+    const assistantText = compactText(String(parsed.assistantText || parsed.assistant_text || ''), 500) || undefined
 
     if (action === 'assistant_text') {
       const content = compactText(String(parsed.content || ''), 500)
+      // 如果 assistant_text 同时携带了 toolName，说明模型想"说一句话+调工具"
+      // 将其转化为带 assistantText 的 tool_call
+      const toolName = String(parsed.toolName || parsed.tool || parsed.nextTool || '').trim()
+      if (toolName && content) {
+        const args = isRecord(parsed.args) ? parsed.args : {}
+        const tool = normalizeToolAction({ ...args, action: toolName, reason: parsed.reason || args.reason })
+        if (tool) {
+          return { action: 'tool_call', tool, reason: compactText(String(parsed.reason || ''), 160) || undefined, assistantText: content }
+        }
+      }
       return content ? { action: 'assistant_text', content } : null
     }
 
@@ -161,7 +173,8 @@ export function parseAutonomousAgentAction(value: string, finalAnswerContentChar
       return {
         action: 'final_answer',
         content: compactPreservingLines(parsed.content),
-        reason: compactText(String(parsed.reason || ''), 160) || undefined
+        reason: compactText(String(parsed.reason || ''), 160) || undefined,
+        assistantText
       }
     }
 
@@ -170,7 +183,8 @@ export function parseAutonomousAgentAction(value: string, finalAnswerContentChar
       if (!toolName || toolName === 'answer') {
         return {
           action: 'final_answer',
-          reason: compactText(String(parsed.reason || ''), 160) || undefined
+          reason: compactText(String(parsed.reason || ''), 160) || undefined,
+          assistantText
         }
       }
 
@@ -183,7 +197,8 @@ export function parseAutonomousAgentAction(value: string, finalAnswerContentChar
       return tool ? {
         action: 'tool_call',
         tool,
-        reason: compactText(String(parsed.reason || ''), 160) || undefined
+        reason: compactText(String(parsed.reason || ''), 160) || undefined,
+        assistantText
       } : null
     }
 
@@ -211,7 +226,7 @@ export async function chooseNextAutonomousAgentAction(
     const response = await provider.chat([
       {
         role: 'system',
-        content: '你是自主工具编排 Agent。你只能输出一个严格 JSON 对象，不能输出 Markdown。'
+        content: '你是自主工具编排 Agent。你必须输出可解析的严格 JSON 对象。你可以在 JSON 的字符串值内部使用 Markdown 进行排版，但整体响应不能被 Markdown 代码块包裹，也不能包含任何解释性文本。'
       },
       {
         role: 'user',

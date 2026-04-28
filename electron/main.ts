@@ -35,6 +35,7 @@ import { getBestCachePath, getRuntimePlatformInfo } from './services/platformSer
 import { getMcpLaunchConfig as getMcpLaunchConfigForUi, getMcpProxyConfig } from './services/mcp/runtime'
 import { mcpProxyService } from './services/mcp/proxyService'
 import { skillInstallerService } from './services/skillInstallerService'
+import { getElectronWorkerEnv } from './services/workerEnvironment'
 
 type AppWithQuitFlag = typeof app & {
   isQuitting?: boolean
@@ -215,6 +216,7 @@ async function startSessionVectorIndexJob(sessionId: string, sender: WebContents
   }
 
   const worker = new Worker(workerPath, {
+    env: getElectronWorkerEnv(),
     workerData: { sessionId }
   })
   const job: SessionVectorIndexJob = {
@@ -292,6 +294,7 @@ async function startSessionMemoryBuildJob(sessionId: string, sender: WebContents
   }
 
   const worker = new Worker(workerPath, {
+    env: getElectronWorkerEnv(),
     workerData: { sessionId }
   })
 

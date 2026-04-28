@@ -304,21 +304,19 @@ export class AgentDataRepository {
     if (!db) return []
     try {
       const rows = db.prepare('SELECT username, remark, nick_name, alias, type, local_type, quan_pin FROM contact').all() as ContactRow[]
-      return rows
-        .map((row) => {
-          const contactId = String(row.username || '').trim()
-          if (!contactId) return null
-          const displayName = String(row.remark || row.nick_name || row.alias || contactId).trim()
-          return {
-            contactId,
-            sessionId: contactId,
-            displayName,
-            remark: row.remark || undefined,
-            nickname: row.nick_name || undefined,
-            kind: detectContactKind(row)
-          } satisfies AgentContact
-        })
-        .filter((item): item is AgentContact => Boolean(item))
+      return rows.flatMap((row): AgentContact[] => {
+        const contactId = String(row.username || '').trim()
+        if (!contactId) return []
+        const displayName = String(row.remark || row.nick_name || row.alias || contactId).trim()
+        return [{
+          contactId,
+          sessionId: contactId,
+          displayName,
+          remark: row.remark || undefined,
+          nickname: row.nick_name || undefined,
+          kind: detectContactKind(row)
+        }]
+      })
     } catch {
       return []
     }
@@ -338,17 +336,18 @@ export class AgentDataRepository {
         LEFT JOIN contact c ON n.username = c.username
         WHERE m.room_id = (SELECT rowid FROM name2id WHERE username = ?)
       `).all(chatroomId) as ContactRow[]
-      return rows.map((row) => {
+      return rows.flatMap((row): AgentContact[] => {
         const username = String(row.username || '').trim()
-        return {
+        if (!username) return []
+        return [{
           contactId: username,
           sessionId: username,
           displayName: String(row.remark || row.nick_name || username).trim(),
           remark: row.remark || undefined,
           nickname: row.nick_name || undefined,
           kind: 'friend' as const
-        }
-      }).filter((item) => item.contactId)
+        }]
+      })
     } catch {
       return []
     }

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowUp,
   Atom,
   Bot,
   CalendarDays,
@@ -2561,9 +2562,10 @@ function AISummaryWindow() {
           type="button"
           onClick={isAsking ? handleCancelAsk : handleAskQuestion}
           disabled={!isAsking && !qaInput.trim()}
+          aria-label={isAsking ? '取消回答' : '发送消息'}
           data-tooltip={isAsking ? '取消回答' : '发送消息'}
         >
-          {isAsking ? <X size={15} strokeWidth={2.5} /> : <Send size={14} strokeWidth={2.5} style={{ marginLeft: '2px' }} />}
+          {isAsking ? <X size={16} strokeWidth={2.5} /> : <ArrowUp size={18} strokeWidth={2.6} />}
         </button>
       </div>
 
