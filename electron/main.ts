@@ -34,7 +34,8 @@ import { httpApiService } from './services/httpApiService'
 import { getBestCachePath, getRuntimePlatformInfo } from './services/platformService'
 import { getMcpLaunchConfig as getMcpLaunchConfigForUi, getMcpProxyConfig } from './services/mcp/runtime'
 import { mcpProxyService } from './services/mcp/proxyService'
-import { skillInstallerService } from './services/skillInstallerService'
+import { skillManagerService } from './services/skillManagerService'
+import { mcpClientService } from './services/mcpClientService'
 import { getElectronWorkerEnv } from './services/workerEnvironment'
 
 type AppWithQuitFlag = typeof app & {
@@ -1607,8 +1608,53 @@ function registerIpcHandlers() {
     return { success: true, deleted: result.deleted, nextActiveAccountId: result.nextActiveAccountId }
   })
 
-  ipcMain.handle('skillInstaller:exportSkillZip', async (_, skillName: string) => {
-    return skillInstallerService.exportSkillZip(skillName)
+  // ── Skill Manager ──
+  ipcMain.handle('skillManager:list', async () => {
+    return skillManagerService.listSkills()
+  })
+  ipcMain.handle('skillManager:readContent', async (_, skillName: string) => {
+    return skillManagerService.readSkillContent(skillName)
+  })
+  ipcMain.handle('skillManager:updateContent', async (_, skillName: string, content: string) => {
+    return skillManagerService.updateSkillContent(skillName, content)
+  })
+  ipcMain.handle('skillManager:exportZip', async (_, skillName: string) => {
+    return skillManagerService.exportSkillZip(skillName)
+  })
+  ipcMain.handle('skillManager:importZip', async (_, zipPath: string) => {
+    return skillManagerService.importSkillZip(zipPath)
+  })
+  ipcMain.handle('skillManager:delete', async (_, skillName: string) => {
+    return skillManagerService.deleteSkill(skillName)
+  })
+  ipcMain.handle('skillManager:create', async (_, skillName: string, content: string) => {
+    return skillManagerService.createSkill(skillName, content)
+  })
+
+  // ── MCP Client ──
+  ipcMain.handle('mcpClient:listConfigs', async () => {
+    return mcpClientService.listClientConfigs()
+  })
+  ipcMain.handle('mcpClient:saveConfig', async (_, name: string, config: any, overwrite?: boolean) => {
+    return mcpClientService.saveClientConfig(name, config, Boolean(overwrite))
+  })
+  ipcMain.handle('mcpClient:deleteConfig', async (_, name: string) => {
+    return mcpClientService.deleteClientConfig(name)
+  })
+  ipcMain.handle('mcpClient:connect', async (_, name: string) => {
+    return mcpClientService.connectToServer(name)
+  })
+  ipcMain.handle('mcpClient:disconnect', async (_, name: string) => {
+    return mcpClientService.disconnectFromServer(name)
+  })
+  ipcMain.handle('mcpClient:listTools', async (_, name: string) => {
+    return mcpClientService.listToolsFromServer(name)
+  })
+  ipcMain.handle('mcpClient:callTool', async (_, name: string, toolName: string, args: any) => {
+    return mcpClientService.callTool(name, toolName, args)
+  })
+  ipcMain.handle('mcpClient:listStatuses', async () => {
+    return mcpClientService.listAllServerStatuses()
   })
 
   // HTTP API 管理
@@ -5123,6 +5169,9 @@ app.whenReady().then(async () => {
     console.error('[McpProxy] 启动失败:', mcpProxyStartResult.error)
     logService?.error('McpProxy', '内部 MCP 代理启动失败', { error: mcpProxyStartResult.error })
   }
+  mcpClientService.restoreSavedConnections().catch((e) => {
+    console.error('[McpClient] 自动恢复连接失败:', e)
+  })
 
   // 只有在配置完整时才创建主窗口
   // 如果配置不完整，checkAndConnectOnStartup 会创建引导窗口
@@ -5167,6 +5216,9 @@ app.on('before-quit', () => {
   })
   mcpProxyService.stop().catch((e) => {
     console.error('[McpProxy] 停止失败:', e)
+  })
+  mcpClientService.disconnectAll(false).catch((e) => {
+    console.error('[McpClient] 停止失败:', e)
   })
   // 关闭配置数据库连接
   configService?.close()

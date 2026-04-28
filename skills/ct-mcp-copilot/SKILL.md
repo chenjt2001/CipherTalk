@@ -1,5 +1,6 @@
 ---
 name: ct-mcp-copilot
+version: '1.2.0'
 description: Use CipherTalk MCP as an AI copilot for health/status checks, contact lookup, session resolution, message search, context retrieval, moments timeline exploration, chat export, and chat analytics. Trigger when the user provides partial, fuzzy, mistaken, or incomplete clues, or wants the AI to proactively dig for more local data instead of stopping after one failed query.
 ---
 

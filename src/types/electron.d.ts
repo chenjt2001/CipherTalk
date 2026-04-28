@@ -113,8 +113,24 @@ export interface ElectronAPI {
     update: (accountId: string, patch: Partial<Omit<AccountProfile, 'id' | 'createdAt' | 'updatedAt' | 'lastUsedAt'>>) => Promise<AccountProfile | null>
     delete: (accountId: string, deleteLocalData?: boolean) => Promise<{ success: boolean; error?: string; deleted?: AccountProfile | null; nextActiveAccountId?: string }>
   }
-  skillInstaller: {
-    exportSkillZip: (skillName: string) => Promise<{ success: boolean; outputPath?: string; fileName?: string; version?: string; error?: string }>
+  skillManager: {
+    list: () => Promise<Array<{ name: string; version: string; description: string; builtin: boolean }>>
+    readContent: (skillName: string) => Promise<{ success: boolean; content?: string; error?: string }>
+    updateContent: (skillName: string, content: string) => Promise<{ success: boolean; error?: string }>
+    exportZip: (skillName: string) => Promise<{ success: boolean; outputPath?: string; fileName?: string; version?: string; error?: string }>
+    importZip: (zipPath: string) => Promise<{ success: boolean; skillName?: string; error?: string }>
+    delete: (skillName: string) => Promise<{ success: boolean; error?: string }>
+    create: (skillName: string, content: string) => Promise<{ success: boolean; error?: string }>
+  }
+  mcpClient: {
+    listConfigs: () => Promise<Record<string, { type: string; command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; url?: string; headers?: Record<string, string>; timeoutMs?: number; autoConnect?: boolean }>>
+    saveConfig: (name: string, config: { type: string; command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; url?: string; headers?: Record<string, string>; timeoutMs?: number; autoConnect?: boolean }, overwrite?: boolean) => Promise<{ success: boolean; error?: string }>
+    deleteConfig: (name: string) => Promise<{ success: boolean; error?: string }>
+    connect: (name: string) => Promise<{ success: boolean; tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>; error?: string }>
+    disconnect: (name: string) => Promise<{ success: boolean; error?: string }>
+    listTools: (name: string) => Promise<{ success: boolean; tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>; error?: string }>
+    callTool: (name: string, toolName: string, args: Record<string, unknown>) => Promise<{ success: boolean; result?: unknown; error?: string }>
+    listStatuses: () => Promise<Array<{ name: string; config: { type: string; command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; url?: string; headers?: Record<string, string>; timeoutMs?: number; autoConnect?: boolean }; status: string; toolCount: number; error?: string }>>
   }
   db: {
     open: (dbPath: string, key?: string) => Promise<boolean>
