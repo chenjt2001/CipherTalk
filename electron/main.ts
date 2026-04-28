@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, protocol, net, Tray, Menu, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, protocol, net, Tray, Menu, type BrowserWindowConstructorOptions, type WebContents } from 'electron'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import { readFileSync, existsSync, mkdirSync } from 'fs'
@@ -457,6 +457,35 @@ function getAppIconPath(): string {
   }
 }
 
+function loadNativeImageIfValid(iconPath: string, purpose: string): ReturnType<typeof nativeImage.createFromPath> | null {
+  if (!existsSync(iconPath)) {
+    console.warn(`[Icon] ${purpose} not found: ${iconPath}`)
+    return null
+  }
+
+  try {
+    const image = nativeImage.createFromPath(iconPath)
+    if (image.isEmpty()) {
+      console.warn(`[Icon] ${purpose} failed to load: ${iconPath}`)
+      return null
+    }
+    return image
+  } catch (error) {
+    console.warn(`[Icon] ${purpose} failed to load: ${iconPath}`, error)
+    return null
+  }
+}
+
+function getWindowIconOptions(): Pick<BrowserWindowConstructorOptions, 'icon'> {
+  // macOS uses the bundle/dock icon. Passing a missing or invalid .icns here can crash Electron.
+  if (process.platform === 'darwin') {
+    return {}
+  }
+
+  const image = loadNativeImageIfValid(getAppIconPath(), 'window icon')
+  return image ? { icon: image } : {}
+}
+
 function getDockIconPath(): string {
   const isDev = !!process.env.VITE_DEV_SERVER_URL
   const iconName = configService?.get('appIcon') || 'default'
@@ -494,10 +523,10 @@ function getTrayIconPath(): string {
 
 function getTrayImage() {
   const iconPath = getTrayIconPath()
-  const image = nativeImage.createFromPath(iconPath)
+  const image = loadNativeImageIfValid(iconPath, 'tray icon')
 
-  if (image.isEmpty()) {
-    return iconPath
+  if (!image) {
+    return nativeImage.createEmpty()
   }
 
   if (process.platform === 'darwin') {
@@ -510,10 +539,15 @@ function getTrayImage() {
 /**
  * 创建系统托盘
  */
-function createTray() {
+function createTray(): Tray | null {
   if (tray) return tray
 
-  tray = new Tray(getTrayImage())
+  try {
+    tray = new Tray(getTrayImage())
+  } catch (error) {
+    console.warn('[Icon] tray creation failed:', error)
+    return null
+  }
 
   if (process.platform === 'darwin') {
     tray.setIgnoreDoubleClickEvents(true)
@@ -561,14 +595,12 @@ function createTray() {
 }
 
 function createWindow() {
-  const iconPath = getAppIconPath()
-
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1000,
     minHeight: 700,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -702,8 +734,6 @@ function createChatWindow() {
     return chatWindow
   }
 
-  const iconPath = getAppIconPath()
-
   const isDark = nativeTheme.shouldUseDarkColors
 
   chatWindow = new BrowserWindow({
@@ -711,7 +741,7 @@ function createChatWindow() {
     height: 700,
     minWidth: 800,
     minHeight: 600,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -777,8 +807,6 @@ function createGroupAnalyticsWindow() {
     return groupAnalyticsWindow
   }
 
-  const iconPath = getAppIconPath()
-
   const isDark = nativeTheme.shouldUseDarkColors
 
   groupAnalyticsWindow = new BrowserWindow({
@@ -786,7 +814,7 @@ function createGroupAnalyticsWindow() {
     height: 750,
     minWidth: 900,
     minHeight: 600,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -855,8 +883,6 @@ function createMomentsWindow(filterUsername?: string) {
     return momentsWindow
   }
 
-  const iconPath = getAppIconPath()
-
   const isDark = nativeTheme.shouldUseDarkColors
 
   momentsWindow = new BrowserWindow({
@@ -864,7 +890,7 @@ function createMomentsWindow(filterUsername?: string) {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -944,8 +970,6 @@ function createChatHistoryWindow(sessionId: string, messageId: number) {
     return chatHistoryWindow
   }
 
-  const iconPath = getAppIconPath()
-
   const isDark = nativeTheme.shouldUseDarkColors
 
   chatHistoryWindow = new BrowserWindow({
@@ -953,7 +977,7 @@ function createChatHistoryWindow(sessionId: string, messageId: number) {
     height: 800,
     minWidth: 400,
     minHeight: 500,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -1010,8 +1034,6 @@ function createAnnualReportWindow(year: number) {
     annualReportWindow = null
   }
 
-  const iconPath = getAppIconPath()
-
   const isDark = nativeTheme.shouldUseDarkColors
 
   annualReportWindow = new BrowserWindow({
@@ -1019,7 +1041,7 @@ function createAnnualReportWindow(year: number) {
     height: 800,
     minWidth: 900,
     minHeight: 650,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -1082,8 +1104,6 @@ function createAgreementWindow() {
     return agreementWindow
   }
 
-  const iconPath = getAppIconPath()
-
   const isDark = nativeTheme.shouldUseDarkColors
 
   agreementWindow = new BrowserWindow({
@@ -1091,7 +1111,7 @@ function createAgreementWindow() {
     height: 700,
     minWidth: 600,
     minHeight: 500,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -1142,8 +1162,6 @@ function createWelcomeWindow(mode: 'default' | 'add-account' = 'default') {
     return welcomeWindow
   }
 
-  const iconPath = getAppIconPath()
-
   welcomeWindow = new BrowserWindow({
     width: 1100,
     height: 760,
@@ -1153,7 +1171,7 @@ function createWelcomeWindow(mode: 'default' | 'add-account' = 'default') {
     transparent: true,
     backgroundColor: '#00000000',
     hasShadow: false,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -1193,14 +1211,12 @@ function createPurchaseWindow() {
     return purchaseWindow
   }
 
-  const iconPath = getAppIconPath()
-
   purchaseWindow = new BrowserWindow({
     width: 1000,
     height: 700,
     minWidth: 800,
     minHeight: 600,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       devTools: allowDevTools,
       contextIsolation: true,
@@ -1249,14 +1265,12 @@ function createImageViewerWindow(
   liveVideoPath?: string,
   options?: ImageViewerOpenOptions
 ) {
-  const iconPath = getAppIconPath()
-
   const win = new BrowserWindow({
     width: 800,
     height: 600,
     minWidth: 400,
     minHeight: 300,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -1308,8 +1322,6 @@ function createImageViewerWindow(
  * 窗口大小会根据视频比例自动调整
  */
 function createVideoPlayerWindow(videoPath: string, videoWidth?: number, videoHeight?: number) {
-  const iconPath = getAppIconPath()
-
   // 获取屏幕尺寸
   const { screen } = require('electron')
   const primaryDisplay = screen.getPrimaryDisplay()
@@ -1356,7 +1368,7 @@ function createVideoPlayerWindow(videoPath: string, videoWidth?: number, videoHe
     height: winHeight,
     minWidth: 360,
     minHeight: 280,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -1409,14 +1421,12 @@ function createVideoPlayerWindow(videoPath: string, videoWidth?: number, videoHe
  * 创建内置浏览器窗口
  */
 function createBrowserWindow(url: string, title?: string) {
-  const iconPath = getAppIconPath()
-
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -1479,8 +1489,6 @@ function createAISummaryWindow(sessionId: string, sessionName: string) {
     aiSummaryWindow = null
   }
 
-  const iconPath = getAppIconPath()
-
   const isDark = nativeTheme.shouldUseDarkColors
 
   aiSummaryWindow = new BrowserWindow({
@@ -1488,7 +1496,7 @@ function createAISummaryWindow(sessionId: string, sessionName: string) {
     height: 760,
     minWidth: 900,
     minHeight: 600,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       devTools: allowDevTools,
@@ -4834,12 +4842,10 @@ let startupDbConnected = false
  * 创建启动屏窗口
  */
 function createSplashWindow(): BrowserWindow {
-  const iconPath = getAppIconPath()
-
   const splash = new BrowserWindow({
     width: 420,
     height: 320,
-    icon: iconPath,
+    ...getWindowIconOptions(),
     frame: false,
     transparent: true, // 启用透明，让 CSS 圆角生效
     alwaysOnTop: true,
