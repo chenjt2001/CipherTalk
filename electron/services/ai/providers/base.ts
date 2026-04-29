@@ -27,6 +27,15 @@ export interface AIProvider {
   ): Promise<NativeToolCallResult>
 
   /**
+   * 原生工具调用（流式接收工具调用前的 assistant 文本）
+   */
+  streamChatWithTools?(
+    messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    options: ChatWithToolsOptions,
+    onChunk: (chunk: string) => void
+  ): Promise<NativeToolCallResult>
+
+  /**
    * 流式聊天
    */
   streamChat(
@@ -199,6 +208,99 @@ export abstract class BaseAIProvider implements AIProvider {
         message: response.choices[0]?.message || { role: 'assistant', content: '' },
         finishReason: response.choices[0]?.finish_reason || null
       }
+    } catch (error) {
+      throw normalizeNativeToolCallingError(error)
+    }
+  }
+
+  async streamChatWithTools(
+    messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    options: ChatWithToolsOptions,
+    onChunk: (chunk: string) => void
+  ): Promise<NativeToolCallResult> {
+    const client = await this.getClient()
+    const model = this.resolveModelId(options?.model || this.models[0])
+
+    const requestParams: any = {
+      model,
+      messages,
+      temperature: options?.temperature ?? 0.2,
+      max_tokens: options?.maxTokens,
+      stream: true,
+      tools: options.tools,
+      tool_choice: options.toolChoice ?? 'auto'
+    }
+
+    if (typeof options.parallelToolCalls === 'boolean') {
+      requestParams.parallel_tool_calls = options.parallelToolCalls
+    }
+
+    try {
+      const stream = await client.chat.completions.create(requestParams) as any
+      let role: 'assistant' = 'assistant'
+      let content = ''
+      let finishReason: string | null = null
+      const toolCallByIndex = new Map<number, {
+        id: string
+        type: string
+        function: { name: string; arguments: string }
+      }>()
+
+      for await (const chunk of stream) {
+        const choice = chunk.choices?.[0]
+        if (!choice) continue
+
+        finishReason = choice.finish_reason || finishReason
+        const delta = choice.delta || {}
+        if (delta.role === 'assistant') role = 'assistant'
+
+        if (typeof delta.content === 'string' && delta.content) {
+          content += delta.content
+          onChunk(delta.content)
+        }
+
+        const toolCalls = Array.isArray(delta.tool_calls) ? delta.tool_calls : []
+        for (const toolCallDelta of toolCalls) {
+          const index = Number.isInteger(toolCallDelta.index)
+            ? toolCallDelta.index
+            : toolCallByIndex.size
+          const existing = toolCallByIndex.get(index) || {
+            id: '',
+            type: 'function',
+            function: { name: '', arguments: '' }
+          }
+
+          existing.id = existing.id || toolCallDelta.id || ''
+          existing.type = toolCallDelta.type || existing.type || 'function'
+
+          if (toolCallDelta.function?.name) {
+            existing.function.name += toolCallDelta.function.name
+          }
+          if (toolCallDelta.function?.arguments) {
+            existing.function.arguments += toolCallDelta.function.arguments
+          }
+
+          toolCallByIndex.set(index, existing)
+        }
+      }
+
+      const toolCalls = Array.from(toolCallByIndex.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([, toolCall], index) => ({
+          id: toolCall.id || `tool-call-${index}`,
+          type: toolCall.type || 'function',
+          function: toolCall.function
+        }))
+
+      const message: any = {
+        role,
+        content: content || null
+      }
+      if (toolCalls.length > 0) {
+        message.tool_calls = toolCalls
+      }
+
+      return { message, finishReason }
     } catch (error) {
       throw normalizeNativeToolCallingError(error)
     }

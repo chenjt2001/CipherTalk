@@ -121,6 +121,22 @@ async function main() {
   assert.equal(invalidToolCall.action, null)
   assert.match(invalidToolCall.error, /JSON/)
 
+  const router = require(fromRoot('electron', 'services', 'ai-agent', 'qa', 'intent', 'router.ts'))
+  const selfIntroRoute = router.routeFromHeuristics('请介绍一下你自己')
+  assert.equal(selfIntroRoute.intent, 'direct_answer')
+  assert.equal(selfIntroRoute.needsSearch, false)
+  assert.deepEqual(selfIntroRoute.preferredPlan, ['answer'])
+
+  const aiRouter = require(fromRoot('electron', 'services', 'ai-agent', 'qa', 'intent', 'aiRouter.ts'))
+  const modelQuestionRoute = router.routeFromHeuristics('你是什么模型')
+  const modelQuestionDecision = aiRouter.parseAIIntentRouterDecision('```json\n{"needsLocalEvidence":false,"intent":"assistant_meta","confidence":"high","reason":"用户询问助手当前模型"}\n```')
+  assert.ok(modelQuestionDecision)
+  assert.equal(modelQuestionDecision.needsLocalEvidence, false)
+  const modelQuestionRefined = aiRouter.applyAIIntentDecisionToRoute(modelQuestionRoute, modelQuestionDecision)
+  assert.equal(modelQuestionRefined.intent, 'direct_answer')
+  assert.equal(modelQuestionRefined.needsSearch, false)
+  assert.deepEqual(modelQuestionRefined.preferredPlan, ['answer'])
+
   const textParser = require(fromRoot('electron', 'services', 'ai-agent', 'qa', 'data', 'textParser.ts'))
   assert.equal(textParser.parseMessageContent('hello', 1), 'hello')
   assert.equal(textParser.parseMessageContent('<msg><appmsg><type>6</type><title>报价.xlsx</title></appmsg></msg>', 49), '[文件] 报价.xlsx')

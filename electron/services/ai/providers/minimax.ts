@@ -33,7 +33,6 @@ export const MiniMaxMetadata = {
 
 const THINK_OPEN_TAG = '<think>'
 const THINK_CLOSE_TAG = '</think>'
-const TAG_BUFFER_LENGTH = THINK_CLOSE_TAG.length
 
 function extractIncrementalText(current: string, previous: string): string {
   if (!current) return ''
@@ -82,7 +81,6 @@ export class MiniMaxProvider extends BaseAIProvider {
     let reasoningBuffer = ''
     let textBuffer = ''
     let isThinking = false
-    let contentBuffer = ''
 
     const emitThinkOpen = () => {
       if (!enableThinking || isThinking) return
@@ -96,70 +94,6 @@ export class MiniMaxProvider extends BaseAIProvider {
         onChunk(THINK_CLOSE_TAG)
       }
       isThinking = false
-    }
-
-    const emitPlainText = (text: string) => {
-      if (!text) return
-      if (isThinking) {
-        if (enableThinking) {
-          onChunk(text)
-        }
-        return
-      }
-      onChunk(text)
-    }
-
-    const emitBufferedContent = (text: string) => {
-      let remaining = text
-
-      while (remaining.length > 0) {
-        const openIndex = remaining.indexOf(THINK_OPEN_TAG)
-        const closeIndex = remaining.indexOf(THINK_CLOSE_TAG)
-
-        if (openIndex === -1 && closeIndex === -1) {
-          emitPlainText(remaining)
-          return
-        }
-
-        const nextIndex = [openIndex, closeIndex]
-          .filter(index => index >= 0)
-          .sort((a, b) => a - b)[0]
-
-        if (nextIndex > 0) {
-          emitPlainText(remaining.slice(0, nextIndex))
-          remaining = remaining.slice(nextIndex)
-          continue
-        }
-
-        if (remaining.startsWith(THINK_OPEN_TAG)) {
-          emitThinkOpen()
-          remaining = remaining.slice(THINK_OPEN_TAG.length)
-          continue
-        }
-
-        if (remaining.startsWith(THINK_CLOSE_TAG)) {
-          emitThinkClose()
-          remaining = remaining.slice(THINK_CLOSE_TAG.length)
-          continue
-        }
-
-        emitPlainText(remaining[0])
-        remaining = remaining.slice(1)
-      }
-    }
-
-    const flushContentBuffer = (force = false) => {
-      if (!contentBuffer) return
-
-      const flushLength = force
-        ? contentBuffer.length
-        : Math.max(0, contentBuffer.length - TAG_BUFFER_LENGTH)
-
-      if (flushLength <= 0) return
-
-      const flushChunk = contentBuffer.slice(0, flushLength)
-      contentBuffer = contentBuffer.slice(flushLength)
-      emitBufferedContent(flushChunk)
     }
 
     for await (const chunk of stream) {
@@ -195,23 +129,20 @@ export class MiniMaxProvider extends BaseAIProvider {
         }
       }
 
+      // reasoning_split=true 时 content 是纯文本，不会混入 <think> 标签
       if (typeof delta.content === 'string' && delta.content) {
         const newContent = extractIncrementalText(delta.content, textBuffer)
         textBuffer = delta.content
 
         if (newContent) {
-          const hasThinkTags = newContent.includes(THINK_OPEN_TAG) || newContent.includes(THINK_CLOSE_TAG)
-          if (isThinking && !hasThinkTags) {
+          if (isThinking) {
             emitThinkClose()
           }
-
-          contentBuffer += newContent
-          flushContentBuffer(false)
+          onChunk(newContent)
         }
       }
     }
 
-    flushContentBuffer(true)
     emitThinkClose()
   }
 }

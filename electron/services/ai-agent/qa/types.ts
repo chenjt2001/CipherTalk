@@ -214,7 +214,6 @@ export const SEARCH_CONTEXT_AFTER = 6
 export const MAX_TOOL_CALLS = 30
 export const MAX_TOOL_DECISION_ATTEMPTS = 40
 export const MAX_SEARCH_RETRIES = 4
-export const MAX_HISTORY_MESSAGES = 8
 export const MAX_SUMMARY_CHARS = 3000
 export const MAX_STRUCTURED_CHARS = 4000
 export const MAX_MESSAGE_TEXT = 220

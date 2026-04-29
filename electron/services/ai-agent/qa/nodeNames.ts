@@ -24,7 +24,7 @@ export const AGENT_STAGE_NODE_NAMES: Record<SessionQAProgressStage, string> = {
   tool: '运行工具',
   context: '整理依据',
   answer: '生成回答',
-  thought: '规划下一步'
+  thought: '模型响应'
 }
 
 export const AGENT_SOURCE_NODE_NAMES: Record<SessionQAProgressSource, string> = {
@@ -45,4 +45,3 @@ export function getAgentNodeName(input: {
   if (input.stage) return AGENT_STAGE_NODE_NAMES[input.stage]
   return input.title || '运行节点'
 }
-

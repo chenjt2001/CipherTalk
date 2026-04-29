@@ -70,7 +70,7 @@ export function buildAutonomousAgentPrompt(input: BuildDecisionPromptInput): str
     : '无'
   const searchHints = input.route.searchQueries.join('、') || '无'
 
-  return `你是 CipherTalk 的本地聊天记录问答 Agent。你要通过原生 tool calling 自主决定下一步：调用一个本地工具，或直接给出最终答案。
+  return `你是 CipherTalk 的聊天记录问答 Agent。你要通过原生 tool calling 自主决定下一步：调用一个工具，或直接给出最终答案。
 
 当前时间：${formatTime(Date.now())}
 会话：${input.sessionName}

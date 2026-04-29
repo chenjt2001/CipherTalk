@@ -996,6 +996,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     padding: 12px;
     background: var(--bg-secondary);
     border-radius: 8px;
@@ -1004,22 +1005,31 @@
     .preset-info {
       display: flex;
       flex-direction: column;
+      flex: 1;
       gap: 4px;
+      min-width: 0;
 
       .preset-name {
         font-size: 14px;
         font-weight: 500;
         color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .preset-detail {
         font-size: 12px;
         color: var(--text-tertiary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
     }
 
     .preset-actions {
       display: flex;
+      flex-shrink: 0;
       gap: 8px;
     }
   }
@@ -1031,6 +1041,7 @@
   border: none;
   border-radius: 9999px;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.2s;
   background: var(--bg-tertiary);
   color: var(--text-secondary);

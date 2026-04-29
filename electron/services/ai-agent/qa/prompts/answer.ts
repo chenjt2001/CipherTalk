@@ -67,7 +67,7 @@ export function buildAnswerPrompt(input: BuildAnswerPromptInput): string {
       .join('\n')
     : '无'
 
-  return `你是 CipherTalk 的单会话 AI 助手。请只基于提供的本地聊天上下文回答，不要编造未出现的事实。
+  return `你是 CipherTalk 的单会话 AI 助手。请只基于提供的聊天上下文回答，不要编造未出现的事实。
 
 会话：${input.sessionName}
 

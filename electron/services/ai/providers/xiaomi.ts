@@ -1,4 +1,5 @@
-import { BaseAIProvider } from './base'
+import OpenAI from 'openai'
+import { BaseAIProvider, type ChatOptions } from './base'
 
 const XIAOMI_DEFAULT_BASE_URL = 'https://api.xiaomimimo.com/v1'
 const XIAOMI_TOKEN_PLAN_BASE_URL = 'https://token-plan-cn.xiaomimimo.com/v1'
@@ -44,7 +45,6 @@ export class XiaomiProvider extends BaseAIProvider {
   displayName = XiaomiMetadata.displayName
   models = XiaomiMetadata.models
   pricing = XiaomiMetadata.pricingDetail
-  private readonly useTokenPlan: boolean
 
   constructor(apiKey: string) {
     const normalizedApiKey = normalizeApiKey(apiKey)
@@ -54,16 +54,56 @@ export class XiaomiProvider extends BaseAIProvider {
       normalizedApiKey,
       useTokenPlan ? XIAOMI_TOKEN_PLAN_BASE_URL : XIAOMI_DEFAULT_BASE_URL
     )
-
-    this.useTokenPlan = useTokenPlan
   }
 
-  protected getDefaultHeaders(): Record<string, string> | undefined {
-    if (!this.useTokenPlan) return undefined
+  async streamChat(
+    messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    options: ChatOptions,
+    onChunk: (chunk: string) => void
+  ): Promise<void> {
+    const client = await this.getClient()
+    const enableThinking = options?.enableThinking !== false
+    const model = this.resolveModelId(options?.model || this.models[0])
 
-    return {
-      'HTTP-Referer': 'https://openclaw.ai',
-      'X-OpenRouter-Title': 'OpenClaw'
+    const requestParams: any = {
+      model,
+      messages,
+      temperature: options?.temperature || 0.7,
+      max_tokens: options?.maxTokens,
+      stream: true,
+    }
+
+    // 小米 API 只接受 'low' | 'medium' | 'high'，不支持 'none' 和 thinking 对象
+    if (enableThinking) {
+      requestParams.reasoning_effort = 'medium'
+    }
+
+    const stream = await client.chat.completions.create(requestParams) as any
+
+    let isThinking = false
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta
+      const content = delta?.content || ''
+      const reasoning = delta?.reasoning_content || ''
+
+      if (reasoning) {
+        if (!isThinking) {
+          onChunk('<think>')
+          isThinking = true
+        }
+        onChunk(reasoning)
+      } else if (content) {
+        if (isThinking) {
+          onChunk('</think>')
+          isThinking = false
+        }
+        onChunk(content)
+      }
+    }
+
+    if (isThinking) {
+      onChunk('</think>')
     }
   }
 }

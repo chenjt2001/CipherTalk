@@ -257,6 +257,19 @@ export class AgentContext {
     this.answerText += visible
     this.options.onChunk(visible)
   }
+
+  /** 流式输出回答片段 */
+  emitAnswerChunk(chunk: string) {
+    if (!chunk) return
+    this.answerText += chunk
+    this.options.onChunk(chunk)
+  }
+
+  /** 在决策说明和最终回答之间补一个自然分隔 */
+  ensureAnswerSeparator() {
+    if (!this.answerText || /\s$/.test(this.answerText)) return
+    this.emitAnswerChunk('\n\n')
+  }
 }
 
 /**

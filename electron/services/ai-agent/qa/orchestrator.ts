@@ -20,7 +20,6 @@ import {
   MAX_CONTEXT_WINDOWS,
   MAX_SUMMARY_CHARS,
   MAX_STRUCTURED_CHARS,
-  MAX_HISTORY_MESSAGES,
   MAX_TOOL_CALLS,
   MAX_SEARCH_RETRIES,
   SEARCH_CONTEXT_BEFORE,
@@ -38,6 +37,7 @@ import { normalizeSearchQuery, isGenericSearchQuery, generateAlternativeQueries 
 import { dedupeMessagesByCursor, dedupeEvidenceRefs, getMessageCursorKey, formatMessageLine, toEvidenceRef } from './utils/message'
 import { loadSessionContactMap } from './utils/contacts'
 import { routeFromHeuristics, enforceConcreteEvidenceRoute, getRouteLabel } from './intent/router'
+import { refineRouteWithAIIntent, type AIIntentRouterResult } from './intent/aiRouter'
 import { emitProgress } from './progress'
 import { AgentContext, AgentAbortError } from './agentContext'
 import { hasConclusiveSearchFailure, findKnownHitForAction, summarizeSearchObservation, getSearchDiagnostics, interpretSearchFailure } from './evidence'
@@ -48,7 +48,7 @@ import { aggregateMessages } from './tools/aggregate'
 import { buildAutonomousAgentPrompt } from './prompts/decision'
 import { buildAnswerPrompt } from './prompts/answer'
 import { getNativeSessionQATools, parseNativeToolCallArguments, toSessionQAToolName } from './nativeTools'
-import { NATIVE_TOOL_CALLING_UNSUPPORTED_MESSAGE, isNativeToolCallingUnsupportedError } from '../../ai/providers/base'
+import { NATIVE_TOOL_CALLING_UNSUPPORTED_MESSAGE, isNativeToolCallingUnsupportedError, type ChatWithToolsOptions } from '../../ai/providers/base'
 import type { SummaryEvidenceRef } from '../types/analysis'
 import { getAgentNodeName } from './nodeNames'
 
@@ -64,8 +64,7 @@ function buildStructuredContext(analysis?: StructuredAnalysis): string {
 
 function buildHistoryContext(history: SessionQAAgentOptions['history'] = []): string {
   return (history || [])
-    .slice(-MAX_HISTORY_MESSAGES)
-    .map((item) => `${item.role === 'user' ? '用户' : 'AI'}：${compactText(item.content, 500)}`)
+    .map((item) => `${item.role === 'user' ? '用户' : 'AI'}：${item.content}`)
     .join('\n')
 }
 
@@ -663,12 +662,17 @@ ${ctx.question}
 多轮上下文：
 ${historyText || '无'}
 
-请直接、简洁地用中文回应。寒暄、确认、感谢不需要读取聊天记录；如果用户询问能力，可以说明你能查询和分析当前会话的聊天记录，但不要编造具体聊天事实。`
-  ctx.lastAgentPrompt = promptText
+请直接、简洁地用中文回应。寒暄、确认、感谢不需要读取聊天记录；如果用户询问当前模型或服务商，基于“当前助手信息”回答；如果用户询问能力，可以说明你能查询和分析当前会话的聊天记录，但不要编造具体聊天事实。`
+  const assistantInfo = `当前助手信息：
+- 产品：CipherTalk 问答助手
+- 服务商：${ctx.options.provider.displayName || ctx.options.provider.name}
+- 当前模型：${ctx.options.model || '未知'}`
+  const finalPromptText = `${assistantInfo}\n\n${promptText}`
+  ctx.lastAgentPrompt = finalPromptText
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: '你是 CipherTalk 的本地聊天记录问答助手。当前输入不需要工具或聊天记录证据，请自然回应。' },
-    { role: 'user', content: promptText }
+    { role: 'system', content: `你是 CipherTalk 的问答助手。当前输入不需要工具或聊天记录证据，请自然回应。\n${assistantInfo}` },
+    { role: 'user', content: finalPromptText }
   ]
 
   emitProgress(ctx.options, { id: 'answer', stage: 'answer', status: 'running', title: '生成回答', detail: '直接回答，无需调用工具' })
@@ -681,7 +685,7 @@ ${historyText || '无'}
   })
 
   const finalAnswerText = stripThinkBlocks(ctx.answerText)
-  ctx.trackAnswerTokens(promptText, finalAnswerText)
+  ctx.trackAnswerTokens(finalPromptText, finalAnswerText)
   emitProgress(ctx.options, { id: 'answer', stage: 'answer', status: 'completed', title: '生成回答', detail: '回答生成完成' })
   ctx.logger.lifecycle('Agent 直接回答完成', { ...ctx.getTokenUsage() })
 
@@ -689,7 +693,7 @@ ${historyText || '无'}
     answerText: finalAnswerText,
     evidenceRefs: [],
     toolCalls: [],
-    promptText,
+    promptText: finalPromptText,
     tokenUsage: ctx.getTokenUsage()
   }
 }
@@ -749,7 +753,30 @@ export async function answerSessionQuestionWithAgent(
 ): Promise<SessionQAAgentResult> {
   const structuredContext = buildStructuredContext(options.structuredAnalysis)
   const historyText = buildHistoryContext(options.history)
-  const route = enforceConcreteEvidenceRoute(routeFromHeuristics(options.question, options.summaryText), options.question)
+  const heuristicRoute = routeFromHeuristics(options.question, options.summaryText)
+  let route = heuristicRoute
+  let aiIntentResult: AIIntentRouterResult | null = null
+
+  if (!(heuristicRoute.intent === 'direct_answer' && !heuristicRoute.needsSearch)) {
+    try {
+      aiIntentResult = await refineRouteWithAIIntent({
+        provider: options.provider,
+        model: options.model,
+        question: options.question,
+        sessionName: options.sessionName,
+        historyText,
+        heuristicRoute
+      })
+      route = aiIntentResult.route
+    } catch {
+      route = heuristicRoute
+    }
+  }
+
+  if (!(route.intent === 'direct_answer' && !route.needsSearch)) {
+    route = enforceConcreteEvidenceRoute(route, options.question)
+  }
+
   const contactMap = route.intent === 'direct_answer' && !route.needsSearch
     ? new Map<string, string>()
     : await loadSessionContactMap(options.sessionId)
@@ -757,6 +784,9 @@ export async function answerSessionQuestionWithAgent(
     contactMap.set(options.sessionId, options.sessionName)
   }
   const ctx = new AgentContext(options, route, contactMap)
+  if (aiIntentResult) {
+    ctx.trackDecisionTokens(aiIntentResult.promptText, aiIntentResult.responseText)
+  }
 
   const agentDecisionMaxTokens = clampTokenBudget(options.agentDecisionMaxTokens, DEFAULT_AGENT_DECISION_MAX_TOKENS, 512, MAX_AGENT_DECISION_MAX_TOKENS)
   const agentAnswerMaxTokens = clampTokenBudget(options.agentAnswerMaxTokens, DEFAULT_AGENT_ANSWER_MAX_TOKENS, 512, MAX_AGENT_ANSWER_MAX_TOKENS)
@@ -780,28 +810,13 @@ export async function answerSessionQuestionWithAgent(
   const toolLoopMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     {
       role: 'system',
-      content: '你是 CipherTalk 的本地聊天记录问答 Agent。你可以使用 OpenAI-compatible 原生 tools/tool_calls，也可以在问题不需要聊天记录证据时直接回答；不要输出 JSON action。事实类问题证据不足时继续调用工具或明确说明证据不足。'
+      content: '你是 CipherTalk 的聊天记录问答 Agent。你可以使用 OpenAI-compatible 原生 tools/tool_calls，也可以在问题不需要聊天记录证据时直接回答；不要输出 JSON action。需要调用工具时，先用一句简短中文告诉用户你将查看什么，然后立即调用工具。事实类问题证据不足时继续调用工具或明确说明证据不足。'
     },
     {
       role: 'user',
       content: initialAgentPrompt
     }
   ]
-
-  const emitAssistantThought = (text?: string) => {
-    const content = compactText(text || '', 500)
-    if (!content) return
-    const lastThought = ctx.observations.filter((o) => o.title === 'Agent 输出').pop()
-    if (lastThought && lastThought.detail === content) return
-    emitProgress(ctx.options, {
-      id: `thought-${Date.now()}-${ctx.decisionAttempts}`,
-      stage: 'thought',
-      status: 'completed',
-      title: content,
-      detail: content
-    })
-    ctx.observations.push({ title: 'Agent 输出', detail: content })
-  }
 
   try {
     if (typeof options.provider.chatWithTools !== 'function') {
@@ -814,15 +829,24 @@ export async function answerSessionQuestionWithAgent(
       ctx.decisionAttempts += 1
 
       let nativeResponse
+      let streamedDecisionText = ''
       try {
-        nativeResponse = await options.provider.chatWithTools(toolLoopMessages, {
+        const toolOptions: ChatWithToolsOptions = {
           model: options.model,
           temperature: 0.2,
           maxTokens: agentDecisionMaxTokens,
           enableThinking: false,
           tools: nativeTools,
           toolChoice: 'auto'
-        })
+        }
+        if (typeof options.provider.streamChatWithTools === 'function') {
+          nativeResponse = await options.provider.streamChatWithTools(toolLoopMessages, toolOptions, (chunk) => {
+            streamedDecisionText += chunk
+            ctx.emitAnswerChunk(chunk)
+          })
+        } else {
+          nativeResponse = await options.provider.chatWithTools(toolLoopMessages, toolOptions)
+        }
       } catch (error) {
         if ((error instanceof Error && error.message === NATIVE_TOOL_CALLING_UNSUPPORTED_MESSAGE) || isNativeToolCallingUnsupportedError(error)) {
           throw new Error(NATIVE_TOOL_CALLING_UNSUPPORTED_MESSAGE)
@@ -849,7 +873,6 @@ export async function answerSessionQuestionWithAgent(
       toolLoopMessages.push(assistantMessage as OpenAI.Chat.ChatCompletionMessageParam)
 
       if (nativeToolCalls.length > 0) {
-        emitAssistantThought(assistantText)
         let shouldGenerateFinalAnswer = false
 
         for (const toolCall of nativeToolCalls) {
@@ -933,14 +956,15 @@ export async function answerSessionQuestionWithAgent(
       if (assistantText) {
         if (shouldAcceptPlainAssistantAnswer(ctx, route)) {
           emitProgress(options, { id: 'answer', stage: 'answer', status: 'running', title: '生成回答', detail: 'Agent 已决定直接回答' })
-          ctx.emitVisibleText(assistantText)
+          if (!streamedDecisionText) {
+            ctx.emitVisibleText(assistantText)
+          }
           ctx.trackAnswerTokens(ctx.lastAgentPrompt, assistantText)
           emitProgress(options, { id: 'answer', stage: 'answer', status: 'completed', title: '生成回答', detail: '回答生成完成' })
           ctx.logger.lifecycle('Agent 直接回答完成', { ...ctx.getTokenUsage() })
           return { answerText: stripThinkBlocks(ctx.answerText), evidenceRefs: dedupeEvidenceRefs(ctx.evidenceCandidates), toolCalls: ctx.toolCalls, promptText: ctx.lastAgentPrompt, tokenUsage: ctx.getTokenUsage() }
         }
 
-        emitAssistantThought(assistantText)
         const fallbackAction = pickFallbackToolAction(ctx, route)
         if (fallbackAction.action === 'answer') {
           ctx.observations.push({ title: '开始回答', detail: fallbackAction.reason || '本地补充工具已执行完毕，进入最终回答。' })
@@ -1009,7 +1033,7 @@ export async function answerSessionQuestionWithAgent(
   })
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: '你是严谨的本地聊天记录问答助手。你必须基于给定上下文回答，并在证据不足时明确承认不足。' },
+    { role: 'system', content: '你是严谨的聊天记录问答助手。你必须基于给定上下文回答，并在证据不足时明确承认不足。' },
     { role: 'user', content: promptText }
   ]
 
@@ -1017,11 +1041,11 @@ export async function answerSessionQuestionWithAgent(
 
   const enableThinking = options.enableThinking !== false
   const thinkFilterState = { isThinking: false }
+  ctx.ensureAnswerSeparator()
   await options.provider.streamChat(messages, { model: options.model, temperature: 0.3, maxTokens: agentAnswerMaxTokens, enableThinking }, (chunk) => {
     const visibleChunk = enableThinking ? chunk : filterThinkChunk(chunk, thinkFilterState)
     if (!visibleChunk) return
-    ctx.answerText += visibleChunk
-    options.onChunk(visibleChunk)
+    ctx.emitAnswerChunk(visibleChunk)
   })
 
   const finalAnswerText = stripThinkBlocks(ctx.answerText)

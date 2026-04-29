@@ -753,7 +753,6 @@ function AISummaryWindow() {
 
   const getQAHistory = (messages: QAMessage[]): SessionQAHistoryMessage[] => messages
     .filter((message) => !message.isStreaming && !message.error && message.content.trim())
-    .slice(-8)
     .map((message) => ({
       role: message.role,
       content: stripSummaryContent(message.content)
@@ -762,6 +761,11 @@ function AISummaryWindow() {
   const renderMarkdown = (text: string) => {
     const html = marked.parse(text) as string
     return { __html: DOMPurify.sanitize(html) }
+  }
+
+  const renderQAThoughtMarkdown = (text: string) => {
+    const normalizedText = text.replace(/([^\n])\s+(#{1,6}\s+)/g, '$1\n\n$2')
+    return renderMarkdown(normalizedText)
   }
 
   const flushQAChunkBuffer = () => {
@@ -1089,24 +1093,6 @@ function AISummaryWindow() {
     })
   }
 
-  const renderQAProgressStatusIcon = (event: SessionQAProgressEvent) => {
-    if (event.status === 'running') {
-      return <Loader2 size={13} className="spinner" />
-    }
-
-    if (event.status === 'failed') {
-      return <AlertTriangle size={13} />
-    }
-
-    return <CheckCircle2 size={13} />
-  }
-
-  const getQAProgressStatusLabel = (status: SessionQAProgressEvent['status']) => {
-    if (status === 'running') return '执行中'
-    if (status === 'failed') return '失败'
-    return '成功'
-  }
-
   const getQAProgressTargetLabel = (event: SessionQAProgressEvent) => {
     return event.nodeName || event.displayName || event.title
   }
@@ -1117,7 +1103,7 @@ function AISummaryWindow() {
       tool: '运行工具',
       context: '整理依据',
       answer: '生成回答',
-      thought: '规划下一步'
+      thought: '模型响应'
     }
     const sourceLabels: Record<NonNullable<SessionQAProgressEvent['source']>, string> = {
       summary: '摘要事实',
@@ -1143,53 +1129,59 @@ function AISummaryWindow() {
     return lines.filter(Boolean)
   }
 
-  const renderQAProgressCard = (event: SessionQAProgressEvent) => {
-    const isExpanded = expandedQAProgressIds.has(event.id)
+  const renderQAProgressCard = (event: SessionQAProgressEvent, expansionKey: string) => {
+    const isExpanded = expandedQAProgressIds.has(expansionKey)
     const detailLines = isExpanded ? getQAProgressDetailLines(event) : []
 
     return (
-      <div key={event.id} className={`qa-progress-card ${event.stage} ${event.status} ${isExpanded ? 'expanded' : ''}`}>
-        <button
-          type="button"
-          className="qa-progress-summary"
-          onClick={() => toggleQAProgressEvent(event.id)}
-          aria-expanded={isExpanded}
-        >
-          <span className="qa-progress-icon">
-            {renderQAProgressStatusIcon(event)}
-          </span>
-          <span className="qa-progress-title">
-            {getQAProgressTargetLabel(event)}
-          </span>
-          <span className={`qa-progress-status ${event.status}`}>
-            {getQAProgressStatusLabel(event.status)}
-          </span>
-          {event.count !== undefined && (
-            <span className="qa-progress-count">{event.count}</span>
-          )}
-          <ChevronRight size={15} className="qa-progress-chevron" aria-hidden="true" />
-        </button>
+      <div
+        key={expansionKey}
+        className={`qa-progress-card ${event.stage} ${event.status} ${isExpanded ? 'expanded' : ''}`}
+        aria-busy={event.status === 'running'}
+      >
+        <span className="qa-progress-dot" aria-hidden="true" />
 
-        {isExpanded && (
-          <div className="qa-progress-details">
-            {detailLines.map((line, index) => (
-              <p key={`${event.id}-${index}`}>{line}</p>
-            ))}
-          </div>
-        )}
+        <div className="qa-progress-node">
+          <button
+            type="button"
+            className="qa-progress-summary"
+            onClick={() => toggleQAProgressEvent(expansionKey)}
+            aria-expanded={isExpanded}
+          >
+            <span className="qa-progress-title">
+              {getQAProgressTargetLabel(event)}
+            </span>
+            {event.status === 'running' && (
+              <span className="qa-progress-running">
+                <Loader2 size={13} className="spinner" />
+                正在调用
+              </span>
+            )}
+          </button>
+
+          {isExpanded && (
+            <div className="qa-progress-details">
+              {detailLines.map((line, index) => (
+                <p key={`${expansionKey}-${index}`}>{line}</p>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     )
   }
 
-  const renderQAProgressEvents = (events?: SessionQAProgressEvent[]) => {
-    if (!events || events.length === 0) {
+  const renderQAProgressTimeline = (timelineId: string, events: SessionQAProgressEvent[]) => {
+    if (events.length === 0) {
       return null
     }
 
     return (
-      <div className="qa-progress-list" aria-label="AI 工具执行轨迹">
-        {events.map(renderQAProgressCard)}
-      </div>
+      <section key={timelineId} className="qa-progress-timeline" aria-label="AI 执行轨迹">
+        <div className="qa-progress-axis">
+          {events.map((event, index) => renderQAProgressCard(event, `${timelineId}:${event.id}:${index}`))}
+        </div>
+      </section>
     )
   }
 
@@ -1226,18 +1218,36 @@ function AISummaryWindow() {
 
   const renderQATimeline = (message: QAMessage) => {
     type QATimelineItem =
-      | { type: 'tool'; event: SessionQAProgressEvent }
+      | { type: 'progress'; id: string; events: SessionQAProgressEvent[] }
       | { type: 'thought'; event: SessionQAProgressEvent }
       | { type: 'answer'; content: string }
 
     const progressItems = [...(message.progressEvents || [])]
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
 
-    const timelineItems: QATimelineItem[] = progressItems.map((event) => (
-      event.stage === 'thought'
-        ? { type: 'thought', event }
-        : { type: 'tool', event }
-    ))
+    const timelineItems: QATimelineItem[] = []
+    let pendingProgressEvents: SessionQAProgressEvent[] = []
+
+    const flushProgressEvents = () => {
+      if (pendingProgressEvents.length === 0) return
+      const firstEventId = pendingProgressEvents[0]?.id || String(timelineItems.length)
+      timelineItems.push({
+        type: 'progress',
+        id: `${message.id}-progress-${firstEventId}`,
+        events: pendingProgressEvents
+      })
+      pendingProgressEvents = []
+    }
+
+    progressItems.forEach((event) => {
+      if (event.stage === 'thought') {
+        flushProgressEvents()
+        timelineItems.push({ type: 'thought', event })
+      } else {
+        pendingProgressEvents.push(event)
+      }
+    })
+    flushProgressEvents()
 
     const hasAnswerBody = Boolean(
       message.error ||
@@ -1254,7 +1264,6 @@ function AISummaryWindow() {
       return (
         <div className="qa-streaming-placeholder">
           <Loader2 size={14} className="spinner" />
-          <span>正在规划下一步...</span>
         </div>
       )
     }
@@ -1266,15 +1275,18 @@ function AISummaryWindow() {
     return (
       <div className="qa-timeline">
         {timelineItems.map((item) => {
-          if (item.type === 'tool') {
-            return renderQAProgressCard(item.event)
+          if (item.type === 'progress') {
+            return renderQAProgressTimeline(item.id, item.events)
           }
 
           if (item.type === 'thought') {
+            const thoughtText = item.event.title || item.event.detail || ''
             return (
-              <div key={item.event.id} className="qa-thought-bubble">
-                <p>{item.event.title || item.event.detail}</p>
-              </div>
+              <div
+                key={item.event.id}
+                className="qa-thought-bubble markdown-body"
+                dangerouslySetInnerHTML={renderQAThoughtMarkdown(thoughtText)}
+              />
             )
           }
 
