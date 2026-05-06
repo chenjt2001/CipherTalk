@@ -30,7 +30,7 @@ import { registerWxKeyHandlers } from './wxKeyHandlers'
 export function registerModularIpcHandlers(ctx: MainProcessContext): void {
   registerConfigHandlers(ctx)
   registerAccountHandlers(ctx)
-  registerSkillHandlers()
+  registerSkillHandlers(ctx)
   registerMcpHandlers()
   registerHttpApiHandlers(ctx)
   registerDataHandlers(ctx)

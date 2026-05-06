@@ -79,8 +79,15 @@ function resolveSkillDir(skillName: string): string | null {
   return null
 }
 
+let _cacheBasePath: string | null = null
+
+export function setUserSkillsCachePath(cacheBasePath: string): void {
+  _cacheBasePath = cacheBasePath
+}
+
 function getUserSkillsDir(): string {
-  return join(app.getPath('userData'), 'skills')
+  const base = _cacheBasePath || join(app.getPath('userData'), 'CipherTalk')
+  return join(base, 'skills')
 }
 
 function scanSkillDir(baseDir: string, builtin: boolean): SkillInfo[] {

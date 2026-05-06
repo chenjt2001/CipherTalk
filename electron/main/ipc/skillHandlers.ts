@@ -1,7 +1,11 @@
 import { ipcMain } from 'electron'
-import { skillManagerService } from '../../services/skillManagerService'
+import { skillManagerService, setUserSkillsCachePath } from '../../services/skillManagerService'
+import type { MainProcessContext } from '../context'
 
-export function registerSkillHandlers(): void {
+export function registerSkillHandlers(ctx: MainProcessContext): void {
+  const cacheBasePath = ctx.getConfigService()?.getCacheBasePath()
+  if (cacheBasePath) setUserSkillsCachePath(cacheBasePath)
+
   ipcMain.handle('skillManager:list', async () => {
     return skillManagerService.listSkills()
   })
