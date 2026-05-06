@@ -46,7 +46,6 @@ export function createToolError(error: unknown) {
 
   return {
     content: [{ type: 'text' as const, text: payload.message }],
-    structuredContent: payload,
     isError: true
   }
 }
