@@ -2,6 +2,7 @@ import { Command } from 'commander'
 import { processOutput, type OutputTarget } from './output.js'
 import { createCommandContext } from './commandRunner.js'
 import type { ServiceRegistry } from './services/types.js'
+import { registerConfigCommand } from './commands/config.js'
 import { registerContactsCommand } from './commands/contacts.js'
 import { registerExportCommand } from './commands/export.js'
 import { registerInitCommand } from './commands/init.js'
@@ -45,6 +46,7 @@ export function createProgram(options: CreateProgramOptions = {}): Command {
     .option('--quiet', '仅输出数据，不打印状态信息')
 
   registerInitCommand(program, context)
+  registerConfigCommand(program, context)
   registerStatusCommand(program, context)
   registerSessionsCommand(program, context)
   registerMessagesCommand(program, context)

@@ -27,7 +27,7 @@ export class LocalKeyService implements KeyService {
     return { validFormat: Boolean(config.keyHex), connection: status.connection }
   }
 
-  async getKey(_config: RuntimeConfig): Promise<{ keyHex: string }> {
+  async getKey(_config: RuntimeConfig, _options: { save?: boolean } = {}): Promise<{ keyHex: string; saved: boolean }> {
     const dllPath = join(getPlatformNativeDir(), process.platform === 'darwin' ? 'libwx_key.dylib' : 'wx_key.dll')
     if (!existsSync(dllPath)) {
       throw notImplemented(`key get native bridge (${dllPath})`)
@@ -41,7 +41,7 @@ export class LocalKeyService implements KeyService {
       }
     }
 
-    throw notImplemented('key get')
+    throw notImplemented('key get。当前版本自动获取密钥能力尚未接通，请先使用 key set <64位密钥> 或 /key set <64位密钥> 手动填写')
   }
 }
 

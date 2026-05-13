@@ -1,8 +1,9 @@
 import * as readline from 'node:readline'
-import { parseLimit, resolveRuntimeConfig } from './config.js'
+import { clearConfig, patchConfig, parseLimit, readConfig, resolveRuntimeConfig } from './config.js'
 import { errorEnvelope, successEnvelope, writeEnvelope } from './output.js'
 import type { CommandContext } from './commandRunner.js'
 import type { GlobalCliOptions, OutputFormat, RuntimeConfig } from './types.js'
+import type { StatusData } from './services/types.js'
 
 export interface InteractiveCommand {
   name: string
@@ -16,11 +17,12 @@ export interface InteractiveShellOptions {
 
 const COMMANDS: InteractiveCommand[] = [
   { name: '/status', usage: '/status', description: '检查配置和数据库连接状态' },
+  { name: '/config', usage: '/config show|set|clear', description: '查看或修改配置' },
   { name: '/sessions', usage: '/sessions [--limit 20] [--type private|group|mp]', description: '列出会话' },
   { name: '/messages', usage: '/messages <会话> [--limit 50] [--cursor n]', description: '查询会话消息' },
   { name: '/contacts', usage: '/contacts [--limit 50] [--type friend|group|mp]', description: '列出联系人' },
   { name: '/contact', usage: '/contact <wxid或名称>', description: '查看联系人详情' },
-  { name: '/key', usage: '/key get|test|set <hex>', description: '密钥管理' },
+  { name: '/key', usage: '/key setup|get|test|set <hex>', description: '密钥管理' },
   { name: '/search', usage: '/search <关键词>', description: '全文搜索' },
   { name: '/stats', usage: '/stats global|contacts|time|session|keywords|group', description: '统计分析' },
   { name: '/export', usage: '/export <会话> [--output path]', description: '导出聊天数据' },
@@ -46,6 +48,13 @@ export function parseSlashInput(input: string): ParsedInteractiveInput {
   const tokens = splitArgs(input.trim())
   const command = tokens[0] || ''
   return { command, args: tokens.slice(1) }
+}
+
+export function filterInteractiveCommands(input: string): InteractiveCommand[] {
+  const normalized = input.trim().toLowerCase()
+  if (!normalized.startsWith('/')) return []
+  const query = normalized.slice(1)
+  return COMMANDS.filter((command) => command.name.slice(1).toLowerCase().startsWith(query))
 }
 
 function splitArgs(input: string): string[] {
@@ -127,16 +136,16 @@ function showCommandList(): string {
 export function renderWelcomeScreen(): string {
   return [
     '┌──────────────────────────────────────────────┐',
-    '│  Welcome to MiYu CLI                         │',
+    '│  Welcome to CipherTalk CLI                   │',
     '│  欢迎使用密语命令行工具                      │',
     '└──────────────────────────────────────────────┘',
     '',
-    '███╗   ███╗ ██╗ ██╗   ██╗ ██╗   ██╗',
-    '████╗ ████║ ██║ ╚██╗ ██╔╝ ██║   ██║',
-    '██╔████╔██║ ██║  ╚████╔╝  ██║   ██║',
-    '██║╚██╔╝██║ ██║   ╚██╔╝   ██║   ██║',
-    '██║ ╚═╝ ██║ ██║    ██║    ╚██████╔╝',
-    '╚═╝     ╚═╝ ╚═╝    ╚═╝     ╚═════╝',
+    ' ██████╗ ██╗ ██████╗  ██╗  ██╗ ███████╗ ██████╗  ████████╗  █████╗  ██╗      ██╗  ██╗',
+    '██╔════╝ ██║ ██╔══██╗ ██║  ██║ ██╔════╝ ██╔══██╗ ╚══██╔══╝ ██╔══██╗ ██║      ██║ ██╔╝',
+    '██║      ██║ ██████╔╝ ███████║ █████╗   ██████╔╝    ██║    ███████║ ██║      █████╔╝',
+    '██║      ██║ ██╔═══╝  ██╔══██║ ██╔══╝   ██╔══██╗    ██║    ██╔══██║ ██║      ██╔═██╗',
+    '╚██████╗ ██║ ██║      ██║  ██║ ███████╗ ██║  ██║    ██║    ██║  ██║ ███████╗ ██║  ██╗',
+    ' ╚═════╝ ╚═╝ ╚═╝      ╚═╝  ╚═╝ ╚══════╝ ╚═╝  ╚═╝    ╚═╝    ╚═╝  ╚═╝ ╚══════╝ ╚═╝  ╚═╝',
     '',
     '本地微信数据命令行工作台',
     '',
@@ -158,6 +167,80 @@ function asString(value: string | boolean | undefined): string | undefined {
 
 function commandLimit(options: Record<string, string | boolean>, fallback: number): number {
   return parseLimit(asString(options.limit), fallback)
+}
+
+function formatShellValue(value: unknown): string {
+  if (value === true) return '是'
+  if (value === false) return '否'
+  if (value === null || value === undefined || value === '') return '未配置'
+  return String(value)
+}
+
+function statusRows(data: StatusData): Array<{ 项目: string; 内容: string }> {
+  const rows = [
+    { 项目: '配置状态', 内容: data.configured ? '已配置' : '未配置' },
+    { 项目: '配置文件', 内容: formatShellValue(data.configPath) },
+    { 项目: '数据库路径', 内容: formatShellValue(data.dbPath) },
+    { 项目: '微信账号', 内容: formatShellValue(data.wxid) },
+    { 项目: '原生模块目录', 内容: formatShellValue(data.nativeRoot) },
+    { 项目: '数据库文件数', 内容: String(data.databaseFiles) }
+  ]
+
+  if (data.connection) {
+    rows.push(
+      { 项目: '连接状态', 内容: data.connection.ok ? '正常' : '失败' },
+      { 项目: '会话数量', 内容: formatShellValue(data.connection.sessionCount) }
+    )
+    if (data.connection.error) rows.push({ 项目: '连接错误', 内容: data.connection.error })
+  }
+
+  return rows
+}
+
+function statusHint(data: StatusData): string | null {
+  if (data.configured) return null
+  return [
+    '尚未配置数据库路径或密钥。',
+    '可执行：/config set --db-path "<微信Msg目录>" --wxid "<wxid>"',
+    '然后执行：/key setup 选择自动获取或手动填写密钥'
+  ].join('\n')
+}
+
+async function askLine(promptText: string): Promise<string> {
+  process.stdin.setRawMode?.(false)
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  })
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(promptText, resolve)
+  })
+  rl.close()
+  process.stdin.setRawMode?.(true)
+  return answer.trim()
+}
+
+async function runKeySetup(context: CommandContext, config: RuntimeConfig, format: OutputFormat): Promise<void> {
+  context.output.stdout([
+    '请选择密钥配置方式：',
+    '  1. 自动获取：从正在运行的微信进程提取密钥',
+    '  2. 手动填写：粘贴 64 位十六进制密钥',
+    ''
+  ].join('\n'))
+
+  const choice = await askLine('请输入 1 或 2：')
+  if (choice === '1') {
+    const result = await context.services.key.getKey(config, { save: true })
+    writeEnvelope(context.output, successEnvelope(result), format)
+    return
+  }
+  if (choice === '2') {
+    const hex = await askLine('请输入 64 位十六进制密钥：')
+    const result = await context.services.key.setKey(hex)
+    writeEnvelope(context.output, successEnvelope(result), format)
+    return
+  }
+  throw new Error('已取消：请输入 1 选择自动获取，或输入 2 选择手动填写')
 }
 
 async function runShellCommand(line: string, context: CommandContext, globals: GlobalCliOptions): Promise<boolean> {
@@ -183,8 +266,40 @@ async function runShellCommand(line: string, context: CommandContext, globals: G
         return false
       case '/status': {
         const data = await context.services.data.getStatus(config)
-        writeEnvelope(context.output, successEnvelope(data), format)
+        const hint = statusHint(data)
+        writeEnvelope(context.output, successEnvelope({ 状态: statusRows(data) }, { hint }), format)
+        if (hint && format === 'table') context.output.stdout(`\n${hint}`)
         return true
+      }
+      case '/config': {
+        const action = positional[0] || 'show'
+        if (action === 'show') {
+          writeEnvelope(context.output, successEnvelope({
+            配置: readConfig(),
+            配置文件: config.configPath
+          }), format)
+          return true
+        }
+        if (action === 'set') {
+          const patch = {
+            ...(typeof options['db-path'] === 'string' ? { dbPath: options['db-path'] } : {}),
+            ...(typeof options.wxid === 'string' ? { wxid: options.wxid } : {}),
+            ...(typeof options.key === 'string' ? { keyHex: options.key.toLowerCase() } : {}),
+            ...(typeof options.format === 'string' ? { defaultFormat: options.format as any } : {}),
+            ...(typeof options.limit === 'string' ? { defaultLimit: Number(options.limit) } : {}),
+            ...(typeof options['cache-dir'] === 'string' ? { cacheDir: options['cache-dir'] } : {})
+          }
+          const saved = patchConfig(patch)
+          writeEnvelope(context.output, successEnvelope({ 已保存: saved, 配置文件: config.configPath }), format)
+          return true
+        }
+        if (action === 'clear') {
+          const keys = positional.slice(1).map((key) => key === 'key' ? 'keyHex' : key) as any[]
+          const saved = clearConfig(keys.length > 0 ? keys : undefined)
+          writeEnvelope(context.output, successEnvelope({ 已保存: saved, 配置文件: config.configPath }), format)
+          return true
+        }
+        throw new Error('用法: /config show|set|clear')
       }
       case '/sessions': {
         const limit = commandLimit(options, config.defaultLimit)
@@ -228,6 +343,10 @@ async function runShellCommand(line: string, context: CommandContext, globals: G
       }
       case '/key': {
         const action = positional[0]
+        if (!action || action === 'setup') {
+          await runKeySetup(context, config, format)
+          return true
+        }
         if (action === 'set') {
           const hex = positional[1]
           if (!hex) throw new Error('用法: /key set <hex>')
@@ -239,10 +358,10 @@ async function runShellCommand(line: string, context: CommandContext, globals: G
           return true
         }
         if (action === 'get') {
-          writeEnvelope(context.output, successEnvelope(await context.services.key.getKey(config)), format)
+          writeEnvelope(context.output, successEnvelope(await context.services.key.getKey(config, { save: true })), format)
           return true
         }
-        throw new Error('用法: /key get|test|set <hex>')
+        throw new Error('用法: /key setup|get|test|set <hex>')
       }
       case '/search':
         await context.services.advanced.search()
@@ -290,7 +409,7 @@ export async function startInteractiveShell(
   const prompt = 'miyu> '
   let buffer = ''
   let closed = false
-  let commandListVisible = false
+  let selectedSuggestion = 0
   let enteredMainScreen = false
 
   readline.emitKeypressEvents(input)
@@ -311,21 +430,42 @@ export async function startInteractiveShell(
 
   const renderHeader = () => {
     output.write([
-      '密语 CLI 工作台',
+      'CipherTalk CLI 工作台',
       '输入 / 显示命令，输入 /help 查看帮助，输入 /exit 退出。',
       '────────────────────────────────────────────────────────',
       ''
     ].join('\n'))
   }
 
+  const currentSuggestions = () => filterInteractiveCommands(buffer)
+
+  const renderSuggestions = () => {
+    const suggestions = currentSuggestions()
+    if (!buffer.startsWith('/') || suggestions.length === 0) return
+
+    const limit = Math.min(suggestions.length, 8)
+    const width = Math.max(...suggestions.slice(0, limit).map((command) => command.usage.length))
+    output.write('\n')
+    for (let index = 0; index < limit; index += 1) {
+      const command = suggestions[index]
+      const prefix = index === selectedSuggestion ? '›' : ' '
+      output.write(`${prefix} ${command.usage.padEnd(width)}  ${command.description}\n`)
+    }
+    if (suggestions.length > limit) {
+      output.write(`  还有 ${suggestions.length - limit} 个命令，继续输入可缩小范围\n`)
+    }
+  }
+
   const render = () => {
+    clearScreen()
+    renderHeader()
     readline.clearLine(output, 0)
     readline.cursorTo(output, 0)
     output.write(`${prompt}${buffer}`)
+    renderSuggestions()
   }
 
   const printList = () => {
-    commandListVisible = true
     output.write(`\n${showCommandList()}\n`)
     render()
   }
@@ -339,6 +479,7 @@ export async function startInteractiveShell(
       closed = true
       input.off('keypress', onKeypress)
       input.setRawMode?.(false)
+      input.pause()
       leaveScreen()
       resolve()
     }
@@ -384,25 +525,62 @@ export async function startInteractiveShell(
       }
 
       if (key.name === 'return' || key.name === 'enter') {
-        commandListVisible = false
+        const suggestions = currentSuggestions()
+        const isOnlySlashCommand = /^\/[^\s]*$/.test(buffer)
+        if (isOnlySlashCommand && suggestions.length > 0) {
+          const selected = suggestions[Math.min(selectedSuggestion, suggestions.length - 1)]
+          if (selected.name === buffer || buffer === '/exit' || buffer === '/quit' || buffer === '/help') {
+            void execute()
+          } else {
+            buffer = selected.name
+            selectedSuggestion = 0
+            render()
+          }
+          return
+        }
         void execute()
         return
       }
       if (key.name === 'backspace') {
         buffer = buffer.slice(0, -1)
+        selectedSuggestion = 0
         render()
         return
       }
+      if (key.name === 'up') {
+        const suggestions = currentSuggestions()
+        if (suggestions.length > 0) {
+          selectedSuggestion = (selectedSuggestion - 1 + suggestions.length) % suggestions.length
+          render()
+        }
+        return
+      }
+      if (key.name === 'down') {
+        const suggestions = currentSuggestions()
+        if (suggestions.length > 0) {
+          selectedSuggestion = (selectedSuggestion + 1) % suggestions.length
+          render()
+        }
+        return
+      }
       if (key.name === 'tab') {
-        printList()
+        const suggestions = currentSuggestions()
+        if (suggestions.length > 0) {
+          const selected = suggestions[Math.min(selectedSuggestion, suggestions.length - 1)]
+          buffer = selected.name
+          selectedSuggestion = 0
+          render()
+        } else {
+          printList()
+        }
         return
       }
       if (key.name === 'escape') return
       if (!char) return
 
       buffer += char
+      selectedSuggestion = 0
       render()
-      if (buffer === '/' && !commandListVisible) printList()
     }
 
     input.on('keypress', onKeypress)

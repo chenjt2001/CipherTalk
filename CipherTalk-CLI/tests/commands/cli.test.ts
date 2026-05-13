@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createProgram } from '../../src/cli.js'
 import { notImplemented } from '../../src/errors.js'
-import { getInteractiveCommands, parseSlashInput, renderWelcomeScreen } from '../../src/interactiveShell.js'
+import { filterInteractiveCommands, getInteractiveCommands, parseSlashInput, renderWelcomeScreen } from '../../src/interactiveShell.js'
 import type { DataService, KeyService } from '../../src/services/types.js'
 
 function createOutput() {
@@ -51,7 +51,7 @@ const mockKey: KeyService = {
     return { validFormat: true }
   },
   async getKey() {
-    return { keyHex: 'a'.repeat(64) }
+    return { keyHex: 'a'.repeat(64), saved: false }
   }
 }
 
@@ -85,6 +85,21 @@ describe('cli command registration', () => {
     const parsed = JSON.parse(output.stdout[0])
     expect(parsed.ok).toBe(true)
     expect(parsed.data.sessions[0].sessionId).toBe('wxid_a')
+  })
+
+  it('registers config commands', async () => {
+    const output = createOutput()
+    const program = createProgram({
+      services: { data: mockData, key: mockKey },
+      output: output.target,
+      setExitCode: () => undefined
+    })
+
+    await program.parseAsync(['node', 'miyu', '--format', 'json', 'config', 'show'])
+
+    const parsed = JSON.parse(output.stdout[0])
+    expect(parsed.ok).toBe(true)
+    expect(parsed.data).toHaveProperty('config')
   })
 
   it('advanced commands return NOT_IMPLEMENTED instead of failing silently', async () => {
@@ -121,6 +136,7 @@ describe('cli command registration', () => {
       '/sessions',
       '/messages',
       '/contacts',
+      '/key',
       '/search',
       '/exit'
     ]))
@@ -133,9 +149,19 @@ describe('cli command registration', () => {
     })
   })
 
+  it('filters slash command suggestions by typed prefix', () => {
+    expect(filterInteractiveCommands('/s').map((command) => command.name)).toEqual(expect.arrayContaining([
+      '/status',
+      '/sessions',
+      '/search',
+      '/stats'
+    ]))
+    expect(filterInteractiveCommands('status')).toEqual([])
+  })
+
   it('renders a standalone welcome screen for interactive mode', () => {
     const screen = renderWelcomeScreen()
-    expect(screen).toContain('Welcome to MiYu CLI')
+    expect(screen).toContain('Welcome to CipherTalk CLI')
     expect(screen).toContain('欢迎使用密语命令行工具')
     expect(screen).toContain('按 Enter 继续')
   })

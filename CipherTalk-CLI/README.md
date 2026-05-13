@@ -6,6 +6,31 @@
 
 桌面版和 CLI 在运行时互不依赖。需要同步数据层能力时，通过 `npm run sync:upstream` 做人工移植，不直接引用 Electron 模块。
 
+## 安装
+
+```bash
+npm install -g ciphertalk-cli
+miyu status
+```
+
+国内用户可使用 npmmirror 镜像加速：
+
+```bash
+npm install -g ciphertalk-cli --registry https://registry.npmmirror.com
+```
+
+更新：
+
+```bash
+npm update -g ciphertalk-cli
+```
+
+卸载：
+
+```bash
+npm uninstall -g ciphertalk-cli
+```
+
 ## 开发
 
 ```bash
@@ -27,7 +52,7 @@ npm run cli:test
 
 ## 交互模式
 
-在真实终端中执行 `miyu status` 会进入独立的全屏终端界面。界面会先显示欢迎页，按 Enter 后进入密语 CLI 工作台。进入后所有命令都使用 `/命令` 形式：
+在真实终端中执行 `miyu status` 会进入独立的全屏终端界面。界面会先显示 CipherTalk 欢迎页，按 Enter 后进入 CipherTalk CLI 工作台。进入后所有命令都使用 `/命令` 形式：
 
 ```bash
 miyu status
@@ -36,7 +61,7 @@ miyu> /messages "张三" --limit 50
 miyu> /exit
 ```
 
-输入 `/` 会自动显示所有可用命令供选择；输入 `/help` 也可以再次查看命令列表。如果某些终端环境没有自动进入界面，可以使用 `--ui` 强制进入：
+输入 `/` 会打开命令候选区，可以用上下方向键选择，按 Enter 或 Tab 补全命令；继续输入会过滤候选项。输入 `/help` 可以查看完整命令列表。如果某些终端环境没有自动进入界面，可以使用 `--ui` 强制进入：
 
 ```bash
 miyu --ui status
@@ -47,6 +72,42 @@ miyu --ui status
 ```bash
 miyu --format json status
 miyu --quiet status
+```
+
+## 配置
+
+配置文件默认写入 `~/.miyu/config.json`。可以通过命令配置，不需要手动编辑文件：
+
+```bash
+miyu config set --db-path "C:/Users/你/Documents/WeChat Files/wxid_xxx/Msg" --wxid wxid_xxx
+miyu key set <64位十六进制密钥>
+miyu config show
+```
+
+交互模式中也可以配置：
+
+```bash
+/config set --db-path "C:/Users/你/Documents/WeChat Files/wxid_xxx/Msg" --wxid wxid_xxx
+/key setup
+/status
+```
+
+密钥配置是双向选择，不是失败后兜底。交互模式中执行：
+
+```bash
+/key setup
+```
+
+然后选择：
+
+- 自动获取：从正在运行的微信进程提取密钥
+- 手动填写：粘贴 64 位十六进制密钥
+
+非交互命令也保留两种明确入口：
+
+```bash
+miyu key get --save
+miyu key set <64位十六进制密钥>
 ```
 
 ## 发布

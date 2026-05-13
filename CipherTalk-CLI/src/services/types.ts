@@ -57,7 +57,7 @@ export interface DataService {
 export interface KeyService {
   setKey(hex: string): Promise<{ saved: boolean; keyHex: string }>
   testKey(config: RuntimeConfig): Promise<{ validFormat: boolean; connection?: StatusData['connection'] }>
-  getKey(config: RuntimeConfig): Promise<{ keyHex: string }>
+  getKey(config: RuntimeConfig, options?: { save?: boolean }): Promise<{ keyHex: string; saved: boolean }>
 }
 
 export interface AdvancedService {

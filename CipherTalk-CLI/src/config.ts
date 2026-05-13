@@ -41,6 +41,15 @@ export function patchConfig(patch: ConfigFile): ConfigFile {
   return writeConfig({ ...readConfig(), ...patch })
 }
 
+export function clearConfig(keys?: Array<keyof ConfigFile>): ConfigFile {
+  if (!keys || keys.length === 0) return writeConfig({})
+  const current = readConfig()
+  for (const key of keys) {
+    delete current[key]
+  }
+  return writeConfig(current)
+}
+
 export function parseLimit(raw: string | number | undefined, fallback: number): number {
   if (raw === undefined || raw === '') return fallback
   const value = typeof raw === 'number' ? raw : Number(raw)

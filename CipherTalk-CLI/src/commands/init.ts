@@ -19,7 +19,7 @@ export function registerInitCommand(program: Command, context: CommandContext): 
           ...(typeof options.cacheDir === 'string' ? { cacheDir: options.cacheDir } : {})
         }
         const saved = patchConfig({ ...readConfig(), ...patch })
-        return { saved, configPath: _config.configPath }
+        return { data: { saved, configPath: _config.configPath } }
       })
     })
 }
