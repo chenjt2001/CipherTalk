@@ -32,6 +32,8 @@ This skill is expected to use all currently exposed CipherTalk MCP tools when re
 - `list_contacts`
 - `search_messages`
 - `get_session_context`
+- `transcribe_voice_message`
+- `transcribe_audio_file`
 - `get_global_statistics`
 - `get_contact_rankings`
 - `get_activity_distribution`
@@ -47,6 +49,22 @@ This skill is expected to use all currently exposed CipherTalk MCP tools when re
 7. If the user is asking about朋友圈/动态/点赞/评论/某段时间的分享内容 and the clue is a person name / remark / nickname, resolve the poster first with `list_contacts(q=<clue>)`, then pass `items[].contactId` into `get_moments_timeline.usernames[]`.
 8. Use `get_moments_timeline(keyword=<clue>)` first only when the clue is about the post body or topic, not the poster identity.
 9. Use analytics tools only after the target scope is reasonably stable.
+10. If the user asks what a voice message says, first use `get_messages`, `get_session_context`, or `search_messages` to locate the `kind="voice"` message, then call `transcribe_voice_message` with that message's `sessionId`, `cursor.localId`, and `cursor.createTime`.
+11. If the user provides a local mp3/wav/m4a/flac/ogg/opus/aac/amr path and asks for a transcript, call `transcribe_audio_file(filePath=...)`.
+
+## Voice transcription workflow
+
+When a message item has `kind="voice"`:
+
+- If `message.media.transcript` is already present, answer from that cached transcript.
+- If the user asks to transcribe or inspect the voice content, call `transcribe_voice_message`.
+- Use `force=true` only when the user asks to retry or refresh the transcript.
+- Do not claim voice content from `[语音消息]` placeholders; transcribe first.
+
+When the user gives a local audio file path:
+
+- Use `transcribe_audio_file` directly.
+- If the tool returns `STT_NOT_READY`, tell the user to download a local STT model or complete online STT settings in CipherTalk.
 
 ## Health and status routing
 

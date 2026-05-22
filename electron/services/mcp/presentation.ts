@@ -9,6 +9,8 @@ import {
   type McpMemorySearchPayload,
   type McpMessageItem,
   type McpMessagesPayload,
+  type McpVoiceTranscriptionPayload,
+  type McpAudioFileTranscriptionPayload,
   type McpMomentItem,
   type McpMomentsTimelinePayload,
   type McpKeywordStatisticsPayload,
@@ -41,6 +43,7 @@ const messageMediaSchema = z.object({
   localPath: z.string().nullable().optional(),
   md5: z.string().nullable().optional(),
   durationSeconds: z.number().nullable().optional(),
+  transcript: z.string().nullable().optional(),
   fileName: z.string().nullable().optional(),
   fileSize: z.number().nullable().optional(),
   exists: z.boolean().nullable().optional(),
@@ -407,6 +410,21 @@ export const toolOutputSchemas = {
     rerank: retrievalRerankSchema,
     latencyMs: z.number()
   }).passthrough(),
+  transcribe_voice_message: z.object({
+    source: z.literal('voice_message'),
+    sessionId: z.string(),
+    localId: z.number(),
+    createTime: z.number(),
+    transcript: z.string(),
+    cached: z.boolean(),
+    sttMode: z.enum(['cpu', 'gpu', 'online'])
+  }).passthrough(),
+  transcribe_audio_file: z.object({
+    source: z.literal('audio_file'),
+    filePath: z.string(),
+    transcript: z.string(),
+    sttMode: z.enum(['cpu', 'gpu', 'online'])
+  }).passthrough(),
   get_session_context: z.object({
     session: sessionRefSchema,
     mode: z.enum(MCP_CONTEXT_MODES),
@@ -575,6 +593,15 @@ function buildMemorySearchPreview(payload: McpMemorySearchPayload): string {
   return `${summary}${previewLines(lines)}`
 }
 
+function buildVoiceTranscriptionPreview(payload: McpVoiceTranscriptionPayload): string {
+  const cached = payload.cached ? ' cached=yes.' : ''
+  return `Transcribed voice message ${payload.localId} in ${payload.sessionId}.${cached} ${compactText(payload.transcript, '无转写文本')}`
+}
+
+function buildAudioFileTranscriptionPreview(payload: McpAudioFileTranscriptionPayload): string {
+  return `Transcribed audio file ${payload.filePath}. ${compactText(payload.transcript, '无转写文本')}`
+}
+
 function buildMomentsPreview(payload: McpMomentsTimelinePayload): string {
   const summary = `Loaded ${payload.items.length} moments posts.`
   const lines = payload.items.slice(0, PREVIEW_LIMIT).map((item, index) =>
@@ -613,6 +640,10 @@ export function buildToolResultText(toolName: McpToolName, payload: unknown): st
       return buildSearchPreview(payload as McpSearchMessagesPayload)
     case 'search_memory':
       return buildMemorySearchPreview(payload as McpMemorySearchPayload)
+    case 'transcribe_voice_message':
+      return buildVoiceTranscriptionPreview(payload as McpVoiceTranscriptionPayload)
+    case 'transcribe_audio_file':
+      return buildAudioFileTranscriptionPreview(payload as McpAudioFileTranscriptionPayload)
     case 'get_session_context':
       return buildSessionContextPreview(payload as McpSessionContextPayload)
     case 'get_session_statistics':

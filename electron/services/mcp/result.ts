@@ -41,11 +41,13 @@ export function createToolError(error: unknown) {
     ? error.toShape()
     : {
         code: 'INTERNAL_ERROR' as const,
-        message: String(error)
+        message: String(error),
+        hint: undefined
       }
+  const text = `[${payload.code}] ${payload.message}${payload.hint ? `\nHint: ${payload.hint}` : ''}`
 
   return {
-    content: [{ type: 'text' as const, text: payload.message }],
+    content: [{ type: 'text' as const, text }],
     isError: true
   }
 }

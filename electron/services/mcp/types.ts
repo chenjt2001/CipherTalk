@@ -9,6 +9,8 @@ export const MCP_TOOL_NAMES = [
   'list_contacts',
   'search_messages',
   'search_memory',
+  'transcribe_voice_message',
+  'transcribe_audio_file',
   'get_session_context',
   'get_session_statistics',
   'get_keyword_statistics',
@@ -99,6 +101,7 @@ export type McpErrorCode =
   | 'APP_NOT_RUNNING'
   | 'DB_NOT_READY'
   | 'SESSION_NOT_FOUND'
+  | 'STT_NOT_READY'
   | 'INTERNAL_ERROR'
 
 export interface McpErrorShape {
@@ -339,6 +342,7 @@ export interface McpMessageMedia {
   localPath?: string | null
   md5?: string | null
   durationSeconds?: number | null
+  transcript?: string | null
   fileName?: string | null
   fileSize?: number | null
   exists?: boolean | null
@@ -367,6 +371,23 @@ export interface McpMessagesPayload {
   offset: number
   limit: number
   hasMore: boolean
+}
+
+export interface McpVoiceTranscriptionPayload {
+  source: 'voice_message'
+  sessionId: string
+  localId: number
+  createTime: number
+  transcript: string
+  cached: boolean
+  sttMode: 'cpu' | 'gpu' | 'online'
+}
+
+export interface McpAudioFileTranscriptionPayload {
+  source: 'audio_file'
+  filePath: string
+  transcript: string
+  sttMode: 'cpu' | 'gpu' | 'online'
 }
 
 export interface McpSearchHit {
@@ -722,6 +743,8 @@ export interface McpToolPayloadMap {
   list_contacts: McpContactsPayload
   search_messages: McpSearchMessagesPayload
   search_memory: McpMemorySearchPayload
+  transcribe_voice_message: McpVoiceTranscriptionPayload
+  transcribe_audio_file: McpAudioFileTranscriptionPayload
   get_session_context: McpSessionContextPayload
   get_session_statistics: McpSessionStatisticsPayload
   get_keyword_statistics: McpKeywordStatisticsPayload

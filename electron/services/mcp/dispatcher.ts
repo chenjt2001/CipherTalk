@@ -92,6 +92,14 @@ export async function executeMcpTool<T extends McpToolName>(
       const payload = await readService.searchMemory(args as any, defaults.mcpExposeMediaPaths, reporter)
       return { summary: buildToolResultText('search_memory', payload), payload } as McpToolResult<T>
     }
+    case 'transcribe_voice_message': {
+      const payload = await readService.transcribeVoiceMessage(args as any, reporter)
+      return { summary: buildToolResultText('transcribe_voice_message', payload), payload } as McpToolResult<T>
+    }
+    case 'transcribe_audio_file': {
+      const payload = await readService.transcribeAudioFile(args as any, reporter)
+      return { summary: buildToolResultText('transcribe_audio_file', payload), payload } as McpToolResult<T>
+    }
     case 'get_session_context': {
       const defaults = getMcpConfigSnapshot()
       const payload = await readService.getSessionContext(args as any, defaults.mcpExposeMediaPaths, reporter)

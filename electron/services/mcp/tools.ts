@@ -274,6 +274,41 @@ export function registerCipherTalkMcpTools(server: any) {
     }
   })
 
+  server.registerTool('transcribe_voice_message', {
+    title: 'Transcribe Voice Message',
+    description: 'Transcribe one WeChat voice message into text using the current CipherTalk STT settings. Use get_messages or search_messages first to get the voice message cursor fields.',
+    inputSchema: {
+      sessionId: z.string().trim().min(1).describe('Required chat sessionId containing the voice message.'),
+      localId: z.number().int().positive().describe('Voice message localId from message.cursor.localId.'),
+      createTime: z.number().int().positive().describe('Voice message createTime from message.cursor.createTime.'),
+      force: z.boolean().optional().describe('When true, ignore cached transcript and transcribe again.')
+    },
+    outputSchema: toolOutputSchemas.transcribe_voice_message
+  }, async (args: unknown) => {
+    try {
+      const payload = await readService.transcribeVoiceMessage((args || {}) as any)
+      return createToolSuccess(buildToolResultText('transcribe_voice_message', payload), payload)
+    } catch (error) {
+      return createToolError(error)
+    }
+  })
+
+  server.registerTool('transcribe_audio_file', {
+    title: 'Transcribe Audio File',
+    description: 'Transcribe a local audio file such as mp3, wav, m4a, flac, ogg, opus, aac, or amr into text using the current CipherTalk STT settings.',
+    inputSchema: {
+      filePath: z.string().trim().min(1).describe('Absolute local path to the audio file.')
+    },
+    outputSchema: toolOutputSchemas.transcribe_audio_file
+  }, async (args: unknown) => {
+    try {
+      const payload = await readService.transcribeAudioFile((args || {}) as any)
+      return createToolSuccess(buildToolResultText('transcribe_audio_file', payload), payload)
+    } catch (error) {
+      return createToolError(error)
+    }
+  })
+
   server.registerTool('get_session_context', {
     title: 'Get Session Context',
     description: 'Return the latest session context or messages around a cursor anchor. Use mode=latest for recent chat, and read message text from items[].text.',

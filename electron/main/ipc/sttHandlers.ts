@@ -4,6 +4,7 @@ import { join } from 'path'
 import { voiceTranscribeService } from '../../services/voiceTranscribeService'
 import { voiceTranscribeServiceOnline } from '../../services/voiceTranscribeServiceOnline'
 import { voiceTranscribeServiceWhisper } from '../../services/voiceTranscribeServiceWhisper'
+import { sttRuntimeService } from '../../services/sttRuntimeService'
 import type { MainProcessContext } from '../context'
 
 type GpuDownloadCancelState = {
@@ -51,60 +52,14 @@ export function registerSttHandlers(ctx: MainProcessContext): void {
   // 转写音频
   ipcMain.handle('stt:transcribe', async (event, wavBase64: string, sessionId: string, createTime: number, force?: boolean) => {
     try {
-      // 先查缓存
-      if (!force) {
-        const cached = voiceTranscribeService.getCachedTranscript(sessionId, createTime)
-        if (cached) {
-          return { success: true, transcript: cached, cached: true }
-        }
-      }
-
       const wavData = Buffer.from(wavBase64, 'base64')
       const win = BrowserWindow.fromWebContents(event.sender)
-
-      // 检查用户设置的 STT 模式
-      const sttMode = await ctx.getConfigService()?.get('sttMode') || 'cpu'
-      console.log('[Main] 读取到的 STT 模式配置:', sttMode)
-      console.log('[Main] configService 是否存在:', !!ctx.getConfigService())
-
-      // 调试：打印所有配置
-      if (ctx.getConfigService()) {
-        const allConfig = {
-          sttMode: await ctx.getConfigService()?.get('sttMode'),
-          whisperModelType: await ctx.getConfigService()?.get('whisperModelType')
+      const result = await sttRuntimeService.transcribeWavBuffer(wavData, {
+        cache: { sessionId, createTime, force },
+        onPartial: (text) => {
+          win?.webContents.send('stt:partialResult', text)
         }
-        console.log('[Main] 当前所有 STT 配置:', allConfig)
-      }
-
-      let result: { success: boolean; transcript?: string; error?: string }
-
-      if (sttMode === 'gpu') {
-        // 使用 Whisper GPU 加速
-        console.log('[Main] 使用 Whisper GPU 模式')
-        const whisperModelType = await ctx.getConfigService()?.get('whisperModelType') || 'small'
-
-        result = await voiceTranscribeServiceWhisper.transcribeWavBuffer(
-          wavData,
-          whisperModelType as any,
-          'auto' // 自动识别语言
-        )
-      } else if (sttMode === 'online') {
-        console.log('[Main] 使用在线 STT 模式')
-        result = await voiceTranscribeServiceOnline.transcribeWavBuffer(wavData, (text) => {
-          win?.webContents.send('stt:partialResult', text)
-        })
-      } else {
-        // 使用 SenseVoice CPU 模式
-        console.log('[Main] 使用 SenseVoice CPU 模式')
-        result = await voiceTranscribeService.transcribeWavBuffer(wavData, (text) => {
-          win?.webContents.send('stt:partialResult', text)
-        })
-      }
-
-      // 转写成功，保存缓存
-      if (result.success && result.transcript) {
-        voiceTranscribeService.saveTranscriptCache(sessionId, createTime, result.transcript)
-      }
+      })
 
       return result
     } catch (e) {

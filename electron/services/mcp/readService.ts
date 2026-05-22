@@ -13,6 +13,7 @@ import { localRerankerService, type RerankDocument } from '../retrieval/reranker
 import { retrievalEngine } from '../retrieval/retrievalEngine'
 import type { RetrievalExpandedEvidence, RetrievalHit } from '../retrieval/retrievalTypes'
 import { chatSearchIndexService } from '../search/chatSearchIndexService'
+import { sttRuntimeService } from '../sttRuntimeService'
 import { videoService } from '../videoService'
 import { McpToolError } from './result'
 import {
@@ -39,6 +40,8 @@ import {
   type McpMessageMatchField,
   type McpSearchMatchMode,
   type McpMessagesPayload,
+  type McpVoiceTranscriptionPayload,
+  type McpAudioFileTranscriptionPayload,
   type McpKeywordStatisticsItem,
   type McpKeywordStatisticsPayload,
   type McpKeywordStatisticsSample,
@@ -173,6 +176,17 @@ const searchMemoryArgsSchema = z.object({
   includeMediaPaths: z.boolean().optional()
 })
 
+const transcribeVoiceMessageArgsSchema = z.object({
+  sessionId: z.string().trim().min(1),
+  localId: z.number().int().positive(),
+  createTime: z.number().int().positive(),
+  force: z.boolean().optional()
+})
+
+const transcribeAudioFileArgsSchema = z.object({
+  filePath: z.string().trim().min(1)
+})
+
 const analyticsTimeRangeArgsSchema = z.object({
   startTime: z.number().int().positive().optional(),
   endTime: z.number().int().positive().optional()
@@ -240,6 +254,8 @@ type GetMessagesArgs = z.infer<typeof getMessagesArgsSchema>
 type ListContactsArgs = z.infer<typeof listContactsArgsSchema>
 type SearchMessagesArgs = z.infer<typeof searchMessagesArgsSchema>
 type SearchMemoryArgs = z.infer<typeof searchMemoryArgsSchema>
+type TranscribeVoiceMessageArgs = z.infer<typeof transcribeVoiceMessageArgsSchema>
+type TranscribeAudioFileArgs = z.infer<typeof transcribeAudioFileArgsSchema>
 type GetMomentsTimelineArgs = z.infer<typeof getMomentsTimelineArgsSchema>
 type GetSessionContextArgs = z.infer<typeof getSessionContextArgsSchema>
 type GetSessionStatisticsArgs = z.infer<typeof getSessionStatisticsArgsSchema>
@@ -1398,7 +1414,8 @@ async function normalizeMessage(
     case 'voice':
       normalized.media = {
         type: 'voice',
-        durationSeconds: Number(message.voiceDuration || 0) || null
+        durationSeconds: Number(message.voiceDuration || 0) || null,
+        transcript: sttRuntimeService.getCachedTranscript(sessionId, Number(message.createTime || 0))
       }
       if (options.includeMediaPaths) {
         normalized.media.localPath = await getVoiceLocalPath(sessionId, message)
@@ -2028,6 +2045,116 @@ export class McpReadService {
 
     await reportPartial(reporter, 'export_chat', completedPayload)
     return completedPayload
+  }
+
+  private mapSttError(error?: string, code?: string): never {
+    if (code === 'STT_NOT_READY') {
+      throw new McpToolError(
+        'STT_NOT_READY',
+        error || 'STT is not ready.',
+        '请先在设置页下载本地语音识别模型，或补齐在线语音转写配置。'
+      )
+    }
+
+    throw new McpToolError('INTERNAL_ERROR', 'STT transcription failed.', error)
+  }
+
+  async transcribeVoiceMessage(
+    rawArgs: TranscribeVoiceMessageArgs,
+    reporter?: McpStreamReporter
+  ): Promise<McpVoiceTranscriptionPayload> {
+    const args = transcribeVoiceMessageArgsSchema.safeParse(rawArgs)
+    if (!args.success) {
+      throw new McpToolError('BAD_REQUEST', 'Invalid transcribe_voice_message arguments.', args.error.message)
+    }
+
+    const { sessionId, localId, createTime, force = false } = args.data
+    await reportProgress(reporter, {
+      stage: 'scanning_messages',
+      message: `Loading voice message ${localId} from ${sessionId}.`,
+      sessionsScanned: 1
+    })
+
+    if (!force) {
+      const cached = sttRuntimeService.getCachedTranscript(sessionId, createTime)
+      if (cached) {
+        return {
+          source: 'voice_message',
+          sessionId,
+          localId,
+          createTime,
+          transcript: cached,
+          cached: true,
+          sttMode: sttRuntimeService.getCurrentSttMode()
+        }
+      }
+    }
+
+    const voiceResult = await chatService.getVoiceData(sessionId, String(localId), createTime)
+    if (!voiceResult.success || !voiceResult.data) {
+      const reason = voiceResult.error || '未找到语音数据'
+      if (reason.includes('未找到媒体数据库')) {
+        throw new McpToolError('DB_NOT_READY', 'Voice media database is not ready.', reason)
+      }
+      throw new McpToolError('BAD_REQUEST', 'Voice message audio could not be resolved.', reason)
+    }
+
+    await reportProgress(reporter, {
+      stage: 'writing',
+      message: `Transcribing voice message ${localId}.`,
+      sessionsScanned: 1,
+      messagesScanned: 1
+    })
+
+    const result = await sttRuntimeService.transcribeWavBuffer(Buffer.from(voiceResult.data, 'base64'), {
+      cache: { sessionId, createTime, force }
+    })
+    if (!result.success || !result.transcript) {
+      this.mapSttError(result.error, result.errorCode)
+    }
+
+    return {
+      source: 'voice_message',
+      sessionId,
+      localId,
+      createTime,
+      transcript: result.transcript,
+      cached: Boolean(result.cached),
+      sttMode: result.sttMode
+    }
+  }
+
+  async transcribeAudioFile(
+    rawArgs: TranscribeAudioFileArgs,
+    reporter?: McpStreamReporter
+  ): Promise<McpAudioFileTranscriptionPayload> {
+    const args = transcribeAudioFileArgsSchema.safeParse(rawArgs)
+    if (!args.success) {
+      throw new McpToolError('BAD_REQUEST', 'Invalid transcribe_audio_file arguments.', args.error.message)
+    }
+
+    const filePath = args.data.filePath
+    const validation = sttRuntimeService.validateAudioFilePath(filePath)
+    if (!validation.valid) {
+      throw new McpToolError('BAD_REQUEST', 'Invalid audio file path.', validation.error)
+    }
+
+    await reportProgress(reporter, {
+      stage: 'writing',
+      message: `Transcribing audio file: ${filePath}.`
+    })
+
+    const result = await sttRuntimeService.transcribeAudioFile(filePath)
+    if (!result.success || !result.transcript) {
+      this.mapSttError(result.error, result.errorCode)
+    }
+
+    return {
+      source: 'audio_file',
+      filePath,
+      transcript: result.transcript,
+      sttMode: result.sttMode
+    }
   }
 
   async listSessions(rawArgs: ListSessionsArgs, reporter?: McpStreamReporter): Promise<McpSessionsPayload> {

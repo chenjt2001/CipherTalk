@@ -12,6 +12,8 @@ import type {
   McpHealthPayload,
   McpMomentsTimelinePayload,
   McpMessagesPayload,
+  McpVoiceTranscriptionPayload,
+  McpAudioFileTranscriptionPayload,
   McpKeywordStatisticsPayload,
   McpMemorySearchPayload,
   McpResolveSessionPayload,
@@ -168,7 +170,7 @@ export class McpReadService {
       const message = payload && 'error' in payload ? String(payload.error?.message || '内部 MCP 代理请求失败。') : '内部 MCP 代理请求失败。'
       const hint = payload && 'error' in payload ? payload.error?.hint : undefined
       throw new McpToolError(
-        code === 'APP_NOT_RUNNING' || code === 'DB_NOT_READY' || code === 'SESSION_NOT_FOUND' || code === 'BAD_REQUEST'
+        code === 'APP_NOT_RUNNING' || code === 'DB_NOT_READY' || code === 'SESSION_NOT_FOUND' || code === 'BAD_REQUEST' || code === 'STT_NOT_READY'
           ? code
           : 'INTERNAL_ERROR',
         message,
@@ -322,6 +324,14 @@ export class McpReadService {
       ...rawArgs,
       includeMediaPaths: rawArgs.includeMediaPaths ?? defaultIncludeMediaPaths
     })
+  }
+
+  async transcribeVoiceMessage(rawArgs: Record<string, unknown>): Promise<McpVoiceTranscriptionPayload> {
+    return this.callProxy<McpVoiceTranscriptionPayload>('transcribe_voice_message', rawArgs)
+  }
+
+  async transcribeAudioFile(rawArgs: Record<string, unknown>): Promise<McpAudioFileTranscriptionPayload> {
+    return this.callProxy<McpAudioFileTranscriptionPayload>('transcribe_audio_file', rawArgs)
   }
 
   async getSessionContext(rawArgs: Record<string, unknown>, defaultIncludeMediaPaths: boolean): Promise<McpSessionContextPayload> {
