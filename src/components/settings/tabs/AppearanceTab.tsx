@@ -1,5 +1,5 @@
-import { Check, Monitor, Moon, Sun } from 'lucide-react'
-import { themes, useThemeStore } from '../../../stores/themeStore'
+import { Check, Monitor, Moon, Sun, PanelLeft, LayoutPanelTop } from 'lucide-react'
+import { themes, useThemeStore, type NavLayout } from '../../../stores/themeStore'
 import { useSettingsStore } from '../settingsStore'
 import Select from '../../Select'
 import { SegmentedControl } from '../ui'
@@ -7,7 +7,7 @@ import { SegmentedControl } from '../ui'
 type ThemeMode = 'light' | 'dark' | 'system'
 
 function AppearanceTab() {
-  const { currentTheme, themeMode, setTheme, setThemeMode } = useThemeStore()
+  const { currentTheme, themeMode, navLayout, dockAutoHide, setTheme, setThemeMode, setNavLayout, setDockAutoHide } = useThemeStore()
   const quoteStyle = useSettingsStore(s => s.config.quoteStyle)
   const closeToTray = useSettingsStore(s => s.config.closeToTray)
   const setField = useSettingsStore(s => s.setField)
@@ -37,6 +37,39 @@ function AppearanceTab() {
           </div>
         ))}
       </div>
+
+      <h3 className="section-title" style={{ marginTop: '2rem' }}>导航布局</h3>
+      <SegmentedControl<NavLayout>
+        value={navLayout}
+        onChange={setNavLayout}
+        options={[
+          { value: 'sidebar', label: <><PanelLeft size={16} /> 侧边栏</> },
+          { value: 'dock', label: <><LayoutPanelTop size={16} /> 底部 Dock</> }
+        ]}
+      />
+
+      {navLayout === 'dock' && (
+        <>
+          <h3 className="section-title" style={{ marginTop: '1.5rem' }}>Dock 自动收起</h3>
+          <Select<'on' | 'off'>
+            style={{ maxWidth: 460 }}
+            value={dockAutoHide ? 'on' : 'off'}
+            onChange={(v) => setDockAutoHide(v === 'on')}
+            options={[
+              {
+                value: 'on',
+                label: '空闲时自动收起',
+                description: '鼠标离开 Dock 2.5 秒后收回；移到屏幕底部重新浮出'
+              },
+              {
+                value: 'off',
+                label: '始终显示',
+                description: 'Dock 一直停留在底部不收起'
+              }
+            ]}
+          />
+        </>
+      )}
 
       <h3 className="section-title" style={{ marginTop: '2rem' }}>引用消息样式</h3>
       <div className="quote-style-options">

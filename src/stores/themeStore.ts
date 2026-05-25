@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export type ThemeId = 'cloud-dancer' | 'corundum-blue' | 'kiwi-green' | 'spicy-red' | 'teal-water' | 'new-year' | 'sakura-mist'
 export type ThemeMode = 'light' | 'dark' | 'system'
+export type NavLayout = 'sidebar' | 'dock'
 
 export interface ThemeInfo {
   id: ThemeId
@@ -66,9 +67,13 @@ export const themes: ThemeInfo[] = [
 interface ThemeState {
   currentTheme: ThemeId
   themeMode: ThemeMode
+  navLayout: NavLayout
+  dockAutoHide: boolean
   isLoaded: boolean
   setTheme: (theme: ThemeId) => void
   setThemeMode: (mode: ThemeMode) => void
+  setNavLayout: (layout: NavLayout) => void
+  setDockAutoHide: (v: boolean) => void
   toggleThemeMode: () => void
   loadTheme: () => Promise<void>
 }
@@ -76,6 +81,8 @@ interface ThemeState {
 export const useThemeStore = create<ThemeState>()((set, get) => ({
   currentTheme: 'new-year',
   themeMode: 'light',
+  navLayout: 'dock',
+  dockAutoHide: true,
   isLoaded: false,
 
   setTheme: async (theme) => {
@@ -96,6 +103,24 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
     }
   },
 
+  setNavLayout: async (layout) => {
+    set({ navLayout: layout })
+    try {
+      await window.electronAPI.config.set('navLayout', layout)
+    } catch (e) {
+      console.error('保存导航布局失败:', e)
+    }
+  },
+
+  setDockAutoHide: async (v) => {
+    set({ dockAutoHide: v })
+    try {
+      await window.electronAPI.config.set('dockAutoHide', v)
+    } catch (e) {
+      console.error('保存 Dock 自动收起失败:', e)
+    }
+  },
+
   toggleThemeMode: () => {
     const newMode = get().themeMode === 'light' ? 'dark' : 'light'
     get().setThemeMode(newMode)
@@ -105,10 +130,26 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
     try {
       const theme = await window.electronAPI.config.get('theme') as ThemeId
       const themeMode = await window.electronAPI.config.get('themeMode') as ThemeMode
+      let navLayout = await window.electronAPI.config.get('navLayout') as NavLayout | undefined
+      const dockAutoHide = await window.electronAPI.config.get('dockAutoHide') as boolean | undefined
+
+      // 一次性迁移：旧版本没有 navLayout 选项，统一切换到 Dock 模式
+      const migrated = await window.electronAPI.config.get('navLayoutMigratedV6') as boolean | undefined
+      if (!migrated) {
+        navLayout = 'dock'
+        try {
+          await window.electronAPI.config.set('navLayout', 'dock')
+          await window.electronAPI.config.set('navLayoutMigratedV6', true)
+        } catch (e) {
+          console.error('迁移导航布局失败:', e)
+        }
+      }
 
       set({
         currentTheme: theme || 'cloud-dancer',
         themeMode: themeMode || 'light',
+        navLayout: navLayout || 'dock',
+        dockAutoHide: dockAutoHide ?? true,
         isLoaded: true
       })
     } catch (e) {

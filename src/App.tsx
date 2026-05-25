@@ -3,6 +3,7 @@ import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import TitleBar from './components/TitleBar'
 import Sidebar from './components/Sidebar'
+import BottomDock from './components/BottomDock'
 import RouteGuard from './components/RouteGuard'
 import DecryptProgressOverlay from './components/DecryptProgressOverlay'
 import WelcomePage from './pages/WelcomePage'
@@ -79,7 +80,7 @@ function App() {
   const navigate = useNavigate()
   const location = useLocation()
   const { setDbConnected } = useAppStore()
-  const { currentTheme, themeMode, isLoaded, loadTheme } = useThemeStore()
+  const { currentTheme, themeMode, navLayout, isLoaded, loadTheme } = useThemeStore()
   const { status: activationStatus, checkStatus: checkActivationStatus, initialized: activationInitialized } = useActivationStore()
   const { isLocked, init: initAuth } = useAuthStore()
 
@@ -690,7 +691,7 @@ function App() {
           overflow: 'hidden',
         }}
       >
-        <Sidebar />
+        {navLayout === 'sidebar' && <Sidebar />}
         <Box
           component="main"
           sx={{
@@ -720,6 +721,7 @@ function App() {
           </RouteGuard>
         </Box>
       </Box>
+      {navLayout === 'dock' && <BottomDock />}
       <DecryptProgressOverlay />
       {progressPercent !== null && (
         <div className="download-progress-capsule">
