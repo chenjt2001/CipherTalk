@@ -1947,158 +1947,12 @@ function AISummaryWindow() {
     }
   }, [thinkText])
 
-  useEffect(() => {
-    if (qaContentRef.current) {
-      qaContentRef.current.scrollTop = qaContentRef.current.scrollHeight
-    }
-  }, [qaMessages])
-
   useEffect(() => () => {
     if (summaryStreamFlushTimerRef.current !== null) {
       window.clearTimeout(summaryStreamFlushTimerRef.current)
       summaryStreamFlushTimerRef.current = null
     }
   }, [])
-
-  useEffect(() => {
-    const cleanup = window.electronAPI.ai.onSessionQAEvent((event: SessionQAJobEvent) => {
-      const assistantId = qaRequestMessageMapRef.current.get(event.requestId)
-      if (!assistantId) return
-
-      if (event.kind === 'progress' && event.progress) {
-        setQaMessages(prev => prev.map(message => (
-          message.id === assistantId
-            ? {
-                ...message,
-                progressEvents: upsertQAProgressEvent(message.progressEvents, event.progress!),
-                timelineEvents: upsertQATimelineItems(message.timelineEvents, event.timelineItems || [])
-              }
-            : message
-        )))
-        return
-      }
-
-      if (event.kind === 'stream' && event.streamEvent?.type === 'reasoning_delta') {
-        const text = event.streamEvent.text
-        setQaMessages(prev => prev.map(message => (
-          message.id === assistantId
-            ? {
-                ...message,
-                thinkContent: `${message.thinkContent || ''}${text}`,
-                isThinking: true,
-                showThink: true,
-                timelineEvents: event.timelineItems?.length
-                  ? upsertQATimelineItems(message.timelineEvents, event.timelineItems)
-                  : message.timelineEvents
-              }
-            : message
-        )))
-        return
-      }
-
-      if (event.kind === 'stream' && event.streamEvent?.type === 'content_delta') {
-        const text = event.streamEvent.text
-        if (event.timelineItems?.length) {
-          setQaMessages(prev => prev.map(message => (
-            message.id === assistantId
-              ? {
-                  ...message,
-                  content: `${message.content}${text}`,
-                  isThinking: false,
-                  showThink: message.isThinking ? false : message.showThink,
-                  timelineEvents: upsertQATimelineItems(message.timelineEvents, event.timelineItems)
-                }
-              : message
-          )))
-          return
-        }
-
-        if (qaChunkBufferRef.current.has(assistantId) === false) {
-          setQaMessages(prev => prev.map(message => (
-            message.id === assistantId && message.isThinking
-              ? { ...message, isThinking: false, showThink: false }
-              : message
-          )))
-        }
-
-        const previous = qaChunkBufferRef.current.get(assistantId) || ''
-        qaChunkBufferRef.current.set(assistantId, `${previous}${text}`)
-        scheduleQAChunkFlush()
-        return
-      }
-
-      if (event.kind === 'final' && event.result) {
-        flushQAChunkBuffer()
-        qaRequestMessageMapRef.current.delete(event.requestId)
-        if (activeQARequestIdRef.current === event.requestId) {
-          activeQARequestIdRef.current = null
-          setActiveQARequestId(null)
-          setIsAsking(false)
-        }
-        setQaMessages(prev => prev.map(message => (
-          message.id === assistantId
-            ? {
-                ...message,
-                timelineEvents: upsertQATimelineItems(message.timelineEvents, event.timelineItems || []),
-                content: stripSummaryContent(event.result!.answerText),
-                createdAt: event.result!.createdAt,
-                isStreaming: false,
-                isThinking: false,
-                showThink: false,
-                result: event.result
-              }
-            : message
-        )))
-        return
-      }
-
-      if (event.kind === 'error' || event.kind === 'cancelled') {
-        flushQAChunkBuffer()
-        qaRequestMessageMapRef.current.delete(event.requestId)
-        if (activeQARequestIdRef.current === event.requestId) {
-          activeQARequestIdRef.current = null
-          setActiveQARequestId(null)
-          setIsAsking(false)
-        }
-        const messageText = event.kind === 'cancelled' ? '已取消回答。' : (event.error || '问答失败')
-        if (event.kind === 'error') setQaError(messageText)
-        setQaMessages(prev => prev.map(message => (
-          message.id === assistantId
-            ? {
-                ...message,
-                timelineEvents: upsertQATimelineItems(message.timelineEvents, event.timelineItems || []),
-                content: message.content || (event.kind === 'cancelled' ? messageText : ''),
-                isStreaming: false,
-                isThinking: false,
-                showThink: false,
-                error: event.kind === 'error' ? messageText : undefined
-              }
-            : message
-        )))
-      }
-    })
-
-    return () => {
-      if (qaChunkFlushTimerRef.current !== null) {
-        window.clearTimeout(qaChunkFlushTimerRef.current)
-        qaChunkFlushTimerRef.current = null
-      }
-      qaChunkBufferRef.current.clear()
-      cleanup()
-    }
-  }, [])
-
-  useEffect(() => {
-    const cleanup = window.electronAPI.ai.onSessionQAConversationUpdated((conversation: SessionQAConversationDetail) => {
-      if (!conversation || conversation.sessionId !== sessionId) return
-      upsertQAConversation(conversation)
-      if (conversation.id === activeQAConversationId && !isAsking && qaMessages.length === 0) {
-        setQaMessages(conversation.messages.map(mapStoredQAMessage))
-      }
-    })
-
-    return cleanup
-  }, [activeQAConversationId, isAsking, qaMessages.length, sessionId])
 
   // 从 URL 参数获取 sessionId
   useEffect(() => {
@@ -2951,19 +2805,6 @@ function AISummaryWindow() {
           <LayoutDashboard size={15} />
           <span>智能摘要</span>
         </button>
-        <button
-          type="button"
-          className={`sidebar-mode-tab ${workspaceMode === 'ask' ? 'active' : ''}`}
-          onClick={() => {
-            if (isGenerating) return
-            setWorkspaceMode('ask')
-            setTimeout(() => qaInputRef.current?.focus(), 0)
-          }}
-          disabled={isGenerating}
-        >
-          <MessageCircle size={15} />
-          <span>对话问答</span>
-        </button>
       </div>
 
       {workspaceMode === 'summary'
@@ -3044,16 +2885,6 @@ function AISummaryWindow() {
           )}
           {isGenerating && (
             <div className="generating-status" data-tooltip="正在生成摘要...">
-              <Loader2 className="spinner" size={16} />
-            </div>
-          )}
-          {isAsking && (
-            <button className="title-btn" onClick={handleCancelAsk} data-tooltip="取消回答">
-              <X size={14} />
-            </button>
-          )}
-          {isAsking && (
-            <div className="generating-status" data-tooltip="正在回答...">
               <Loader2 className="spinner" size={16} />
             </div>
           )}
