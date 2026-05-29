@@ -302,6 +302,8 @@ export async function startLocalIntegrationServices(ctx: MainProcessContext): Pr
     const cachePath = configService?.get('cachePath') as string | undefined
     const { agentConversationDb } = await import('../services/agentConversationDb')
     agentConversationDb.init(cachePath || undefined)
+    const { conversationStore } = await import('../services/aiagent/conversationStore')
+    conversationStore.init(cachePath || undefined)
     markStartupMilestone('startup:agent-db-init-done')
   } catch (e) {
     logStartupError('startup:agent-db-init-failed', e)

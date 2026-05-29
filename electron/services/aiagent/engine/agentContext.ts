@@ -17,8 +17,8 @@ import type {
   TimeRangeHint,
   TokenUsage
 } from './types'
-import type { SummaryEvidenceRef } from '../types/analysis'
-import type { StructuredAnalysis } from '../types/analysis'
+import type { SummaryEvidenceRef } from '../../ai-agent/types/analysis'
+import type { StructuredAnalysis } from '../../ai-agent/types/analysis'
 import type { AgentMessage, AgentSearchResult } from './data/models'
 import { assessEvidenceQuality } from './evidence'
 import { getMessageCursorKey, toEvidenceRef } from './utils/message'

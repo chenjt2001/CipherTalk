@@ -1,5 +1,5 @@
-import type { AgentRetriever } from './ai-agent/qa/data/retriever'
-import type { ChatSearchIndexService } from './search/chatSearchIndexService'
+import type { AgentRetriever } from '../engine/data/retriever'
+import type { ChatSearchIndexService } from '../../search/chatSearchIndexService'
 
 export type BuiltinToolDef = {
   type: 'function'
@@ -170,7 +170,7 @@ async function searchOneSession(
 }
 
 export async function executeBuiltinTool(toolName: string, args: Record<string, unknown>, context?: { readLimit?: number }): Promise<unknown> {
-  const { chatService } = await import('./chatService')
+  const { chatService } = await import('../../chatService')
   const userReadLimit = context?.readLimit ?? 50
 
   if (toolName === 'ct_initiate_export') {
@@ -209,8 +209,8 @@ export async function executeBuiltinTool(toolName: string, args: Record<string, 
     const keyword = String(args.keyword || '')
     if (!keyword) return { error: '缺少 keyword 参数' }
     const limit = Math.min(userReadLimit, Math.max(1, Number(args.limit) || Math.min(20, userReadLimit)))
-    const { agentRetriever } = await import('./ai-agent/qa/data/retriever')
-    const { chatSearchIndexService } = await import('./search/chatSearchIndexService')
+    const { agentRetriever } = await import('../engine/data/retriever')
+    const { chatSearchIndexService } = await import('../../search/chatSearchIndexService')
     const sessionId = args.sessionId ? String(args.sessionId) : undefined
 
     if (sessionId) {
@@ -283,7 +283,7 @@ export async function executeBuiltinTool(toolName: string, args: Record<string, 
     const startTime = args.startTime ? Number(args.startTime) : undefined
     const endTime = args.endTime ? Number(args.endTime) : undefined
 
-    const { snsService } = await import('./snsService')
+    const { snsService } = await import('../../snsService')
     const result = await snsService.getTimeline(limit, offset, usernames, keyword, startTime, endTime)
     if (!result.success) return { error: result.error || '获取朋友圈失败，请确认朋友圈数据库已加载' }
 

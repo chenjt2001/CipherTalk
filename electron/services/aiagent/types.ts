@@ -37,10 +37,11 @@ export interface ConversationRequest {
 export type StreamEvent =
   | { type: 'content_delta'; text: string }
   | { type: 'reasoning_delta'; text: string }
+  | { type: 'tool_call_delta'; index: number; delta: unknown }
   | { type: 'tool_call_done'; toolCall: { id?: string; function: { name: string; arguments: string } } }
   | { type: 'tool_result'; toolCallId?: string; toolName: string; result: unknown; error?: string }
   | { type: 'round_start' }
-  | { type: 'message_done'; toolCalls?: unknown[] }
+  | { type: 'message_done'; content?: string; reasoningContent?: string; toolCalls?: unknown[]; finishReason?: string | null }
 
 export type ProgressStatus = 'running' | 'completed' | 'failed'
 
@@ -84,6 +85,14 @@ export interface ConversationDetail extends ConversationSummary {
 
 export interface RunConversationResult {
   conversationId: number
+  answerText?: string
+}
+
+export interface GenerateTitleRequest {
+  conversationId: number
+  userMessage: string
+  assistantResponse: string
+  provider: ProviderCfg
 }
 
 export type StreamEmit = (event: StreamEvent) => void

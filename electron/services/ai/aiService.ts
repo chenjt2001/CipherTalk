@@ -41,7 +41,7 @@ import {
   type SessionQAHistoryMessage,
   type SessionQAProgressEvent,
   type SessionQAToolCall
-} from '../ai-agent/qa/sessionQaAgent'
+} from '../aiagent/engine/sessionQaAgent'
 import { hashMemoryContent, memoryDatabase } from '../memory/memoryDatabase'
 import { memoryProfileService } from '../memory/memoryProfileService'
 import type { SessionProfileMemoryState } from '../memory/memoryProfileService'
