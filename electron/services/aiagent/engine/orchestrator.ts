@@ -29,7 +29,7 @@ import {
   MAX_AGENT_DECISION_MAX_TOKENS,
   MAX_AGENT_ANSWER_MAX_TOKENS
 } from './types'
-import type { StructuredAnalysis } from '../types/analysis'
+import type { StructuredAnalysis } from '../../ai-agent/types/analysis'
 import { compactText, stripThinkBlocks, clampTokenBudget } from './utils/text'
 import { clampToolLimit } from './utils/text'
 import { inferTimeRangeFromQuestion, formatTimeRangeLabel } from './utils/time'
@@ -49,7 +49,7 @@ import { buildAutonomousAgentPrompt } from './prompts/decision'
 import { buildAnswerPrompt } from './prompts/answer'
 import { getNativeSessionQATools, parseNativeToolCallArguments, toSessionQAToolName } from './nativeTools'
 import { NATIVE_TOOL_CALLING_UNSUPPORTED_MESSAGE, isNativeToolCallingUnsupportedError, type ChatWithToolsOptions } from '../../ai/providers/base'
-import type { SummaryEvidenceRef } from '../types/analysis'
+import type { SummaryEvidenceRef } from '../../ai-agent/types/analysis'
 import { getAgentNodeName } from './nodeNames'
 
 // ─── 辅助函数 ────────────────────────────────────────────────

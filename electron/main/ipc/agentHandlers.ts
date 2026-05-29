@@ -254,7 +254,7 @@ export function registerAgentHandlers(ctx: MainProcessContext): void {
 
     try {
       const { agentConversationDb } = await import('../../services/agentConversationDb')
-      const { agentChatService } = await import('../../services/agentChatService')
+      const { globalAgent } = await import('../../services/aiagent/global/globalAgent')
 
       if (agentConversationDb.isInitialized()) {
         if (!convId) {
@@ -290,7 +290,7 @@ export function registerAgentHandlers(ctx: MainProcessContext): void {
           assistantSaved = true
         }
         try {
-          const { BUILTIN_TOOL_SCHEMAS } = await import('../../services/agentBuiltinTools')
+          const { BUILTIN_TOOL_SCHEMAS } = await import('../../services/aiagent/global/builtinTools')
           const { mcpClientService } = await import('../../services/mcpClientService')
           const mcpToolSchemas = mcpClientService.getConnectedToolSchemas()
             .flatMap(({ serverName, tools }) =>
@@ -324,7 +324,7 @@ export function registerAgentHandlers(ctx: MainProcessContext): void {
           }
           const systemPromptSuffix = suffixParts.length > 0 ? suffixParts.join('\n\n') : undefined
 
-          assistantText = await agentChatService.sendMessage({
+          assistantText = await globalAgent.sendMessage({
             history: options.history as any,
             message: options.message,
             provider: options.provider,

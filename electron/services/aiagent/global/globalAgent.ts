@@ -1,5 +1,7 @@
-import { aiService } from './ai/aiService'
-import type { AIStreamEvent, AIStreamToolCall, NativeToolCallResult, NativeToolDefinition } from './ai/providers/base'
+import { aiService } from '../../ai/aiService'
+import type { AIStreamEvent, AIStreamToolCall, NativeToolCallResult, NativeToolDefinition } from '../../ai/providers/base'
+import type { ConversationRequest, StreamEvent, StreamEmit } from '../types'
+import { BUILTIN_TOOL_SCHEMAS } from './builtinTools'
 
 export interface AgentChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -247,7 +249,7 @@ async function runToolLoop(
   return lastText
 }
 
-export const agentChatService = {
+export const globalAgent = {
   async sendMessage(options: AgentChatOptions): Promise<string> {
     const messages = buildMessages(options)
     if (Array.isArray(options.enabledTools) && options.enabledTools.length > 0) {
@@ -255,4 +257,89 @@ export const agentChatService = {
     }
     return runStreamingOnly(options, messages)
   }
+}
+
+export const agentChatService = globalAgent
+
+async function buildSystemPromptSuffix(request: ConversationRequest): Promise<string | undefined> {
+  const suffixParts: string[] = []
+
+  if (request.scopedSessions && request.scopedSessions.length > 0) {
+    const list = request.scopedSessions.map(s => `- ${s.name}（sessionId: ${s.id}）`).join('\n')
+    suffixParts.push(`用户已指定以下会话范围，请优先围绕这些会话回答，使用工具时传入对应的 sessionId：\n${list}`)
+  }
+
+  if (request.commandHint) {
+    suffixParts.push(request.commandHint)
+  }
+
+  if (request.skillIds && request.skillIds.length > 0) {
+    const { skillManagerService } = await import('../../skillManagerService')
+    for (const skillId of request.skillIds) {
+      const result = skillManagerService.readSkillContent(skillId)
+      if (result.success && result.content) {
+        suffixParts.push(result.content)
+      }
+    }
+  }
+
+  return suffixParts.length > 0 ? suffixParts.join('\n\n') : undefined
+}
+
+async function buildEnabledTools(): Promise<McpToolDef[]> {
+  const { mcpClientService } = await import('../../mcpClientService')
+  const mcpToolSchemas = mcpClientService.getConnectedToolSchemas()
+    .flatMap(({ serverName, tools }) =>
+      tools.map(tool => ({
+        type: 'function' as const,
+        function: {
+          name: `${serverName}__${tool.name}`,
+          description: tool.description || '',
+          parameters: (tool.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+        }
+      }))
+    )
+
+  return [...BUILTIN_TOOL_SCHEMAS, ...mcpToolSchemas]
+}
+
+export async function runGlobalConversation(
+  request: ConversationRequest,
+  emit: StreamEmit,
+  signal: AbortSignal
+): Promise<string> {
+  const enabledTools = await buildEnabledTools()
+  const systemPromptSuffix = await buildSystemPromptSuffix(request)
+
+  return globalAgent.sendMessage({
+    history: request.history,
+    message: request.message,
+    provider: request.provider.provider,
+    apiKey: request.provider.apiKey,
+    model: request.provider.model,
+    enableThinking: request.forceThinking ?? request.provider.enableThinking !== false,
+    temperature: request.provider.temperature,
+    systemPromptSuffix,
+    signal,
+    enabledTools,
+    onStreamEvent: (event: AIStreamEvent) => emit(event as StreamEvent),
+    mcpCallTool: async (serverName, toolName, args) => {
+      if (!serverName && toolName.startsWith('ct_')) {
+        try {
+          const { agentToolWorkerService } = await import('../../agentToolWorkerService')
+          const result = await agentToolWorkerService.run(toolName, args, { readLimit: request.readLimit })
+          return { success: true, result }
+        } catch (error) {
+          return { success: false, error: String(error) }
+        }
+      }
+
+      try {
+        const { mcpClientService } = await import('../../mcpClientService')
+        return await mcpClientService.callTool(serverName, toolName, args)
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    }
+  })
 }

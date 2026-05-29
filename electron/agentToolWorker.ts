@@ -1,5 +1,5 @@
 import { parentPort } from 'worker_threads'
-import { executeBuiltinTool } from './services/agentBuiltinTools'
+import { executeBuiltinTool } from './services/aiagent/global/builtinTools'
 
 type ToolRequest = {
   id: number

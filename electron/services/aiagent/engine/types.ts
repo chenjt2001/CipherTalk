@@ -2,7 +2,7 @@
  * SessionQA Agent 公共类型、常量
  */
 import type { AgentContextWindow, AgentCursor, AgentMessage, AgentSearchHit, AgentSearchResult } from './data/models'
-import type { SummaryEvidenceRef } from '../types/analysis'
+import type { SummaryEvidenceRef } from '../../ai-agent/types/analysis'
 
 // ─── 公共接口（对外导出）───────────────────────────────────
 
@@ -63,7 +63,7 @@ export interface SessionQAAgentOptions {
   sessionName?: string
   question: string
   summaryText?: string
-  structuredAnalysis?: import('../types/analysis').StructuredAnalysis
+  structuredAnalysis?: import('../../ai-agent/types/analysis').StructuredAnalysis
   history?: SessionQAHistoryMessage[]
   provider: import('../../ai/providers/base').AIProvider
   model: string

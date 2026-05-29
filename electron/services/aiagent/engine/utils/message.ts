@@ -2,7 +2,7 @@
  * Agent 消息格式化、去重、转换工具。
  */
 import type { AgentCursor, AgentMemoryRef, AgentMessage, AgentMessageKind, AgentSourceMessage } from '../data/models'
-import type { SummaryEvidenceRef } from '../../types/analysis'
+import type { SummaryEvidenceRef } from '../../../ai-agent/types/analysis'
 import { agentDataRepository } from '../data/repository'
 import { detectAgentMessageKind } from '../data/textParser'
 import { MAX_MESSAGE_TEXT } from '../types'
