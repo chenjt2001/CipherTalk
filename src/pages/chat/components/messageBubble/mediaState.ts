@@ -68,7 +68,7 @@ export type CachedVideoInfo = {
   diagnostics?: VideoLookupDiagnostics
 }
 
-export const videoInfoCache = new Map<string, CachedVideoInfo>()
+export const videoInfoCache = new LRUCache<string, CachedVideoInfo>(200)
 
 export let lastIncrementalUpdateTime = 0
 
