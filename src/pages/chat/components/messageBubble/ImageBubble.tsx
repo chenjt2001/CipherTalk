@@ -261,7 +261,8 @@ function ImageBubble({ message, session, hasImageKey, onContextMenu }: ImageBubb
             imageMd5: message.imageMd5 || undefined,
             imageDatName: message.imageDatName,
             createTime: message.createTime,
-            force: false
+            force: false,
+            quick: true
           })
           if (cancelled) return
           if (decryptResult.success && decryptResult.localPath) {
