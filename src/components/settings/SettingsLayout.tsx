@@ -23,7 +23,6 @@ import {
 import '../../pages/SettingsPage.css'
 
 const AISummarySettings = lazy(() => import('../ai/AISummarySettings'))
-const EmbeddingTab = lazy(() => import('./tabs/EmbeddingTab'))
 const DataManagementTab = lazy(() => import('./tabs/DataManagementTab'))
 const DatabaseTab = lazy(() => import('./tabs/DatabaseTab'))
 const SttTab = lazy(() => import('./tabs/SttTab'))
@@ -1367,7 +1366,6 @@ function SettingsLayout() {
         {activeTab === 'ai' && (
           <Suspense fallback={<div className="tab-content">加载中...</div>}>
             <AISummarySettings showMessage={showMessage} />
-            <EmbeddingTab />
           </Suspense>
         )}
         {activeTab === 'data' && (

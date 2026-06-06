@@ -119,6 +119,7 @@ interface ConfigSchema {
   // 嵌入模型（语义/向量检索，独立于聊天模型）
   embeddingConfig: {
     enabled: boolean
+    provider: string  // 选中的服务商 id（catalog），仅 UI 用于展示/自动填地址
     protocol: 'openai-compatible' | 'openai'
     apiKey: string
     baseURL: string
@@ -188,6 +189,7 @@ const defaults: ConfigSchema = {
   aiProviderModelCache: {},
   embeddingConfig: {
     enabled: false,
+    provider: '',
     protocol: 'openai-compatible',
     apiKey: '',
     baseURL: 'https://api.siliconflow.cn/v1',

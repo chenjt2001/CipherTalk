@@ -10,6 +10,7 @@ import { ConfigService } from '../config'
 
 export interface EmbeddingConfig {
   enabled: boolean
+  provider: string
   protocol: 'openai-compatible' | 'openai'
   apiKey: string
   baseURL: string
