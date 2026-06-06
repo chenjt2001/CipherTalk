@@ -479,10 +479,10 @@ function extractSources(parts: any[]): SourceItem[] {
         push({ id: `${sid}:${m.localId}`, sessionId: sid, localId: m.localId, time: m.time, sender: m.sender, text: m.text })
       }
     } else if (name === 'search_messages' || name === 'semantic_search') {
-      const arr = Array.isArray(out) ? out : []
+      const arr = Array.isArray(out) ? out : out.hits || []
       for (const h of arr) {
         const lid = h?.anchor?.localId
-        push({ id: `${h.sessionId}:${lid ?? h.title ?? ''}`, sessionId: h.sessionId, localId: lid, time: h.time, text: h.excerpt || h.title })
+        push({ id: `${h.sessionId}:${lid ?? h.excerpt ?? ''}`, sessionId: h.sessionId, localId: lid, time: h.time, sender: h.sender, text: h.excerpt || h.title })
       }
     }
   }

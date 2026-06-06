@@ -2,6 +2,14 @@ import type { ChatSession, Message, Contact, ContactInfo } from './models'
 import type { AccountProfile } from './account'
 import type { AIModelInfo } from './ai'
 
+export interface EmbeddingConfig {
+  enabled: boolean
+  protocol: 'openai-compatible' | 'openai'
+  apiKey: string
+  baseURL: string
+  model: string
+  dimension: number
+}
 
 export interface ImageListItem {
   imagePath: string
@@ -921,6 +929,11 @@ export interface ElectronAPI {
     abort: (runId: string) => Promise<{ success: boolean }>
     generateTitle: (firstMessage: string, modelConfig?: unknown) => Promise<{ success: boolean; title?: string; error?: string }>
     onChunk: (runId: string, callback: (chunk: unknown) => void) => () => void
+  }
+  embedding: {
+    getConfig: () => Promise<{ success: boolean; config?: EmbeddingConfig; error?: string }>
+    setConfig: (patch: Partial<EmbeddingConfig>) => Promise<{ success: boolean; config?: EmbeddingConfig; error?: string }>
+    test: (cfg: EmbeddingConfig) => Promise<{ success: boolean; dimension?: number; error?: string }>
   }
   // AI 接入
   ai: {

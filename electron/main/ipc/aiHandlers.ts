@@ -49,6 +49,34 @@ export function registerAiHandlers(_ctx: MainProcessContext): void {
     return { success: true }
   })
 
+  // ========= 嵌入模型（语义/向量检索）=========
+  ipcMain.handle('embedding:getConfig', async () => {
+    try {
+      const { getEmbeddingConfig } = await import('../../services/ai/embeddingService')
+      return { success: true, config: getEmbeddingConfig() }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('embedding:setConfig', async (_e, patch: Record<string, unknown>) => {
+    try {
+      const { saveEmbeddingConfig } = await import('../../services/ai/embeddingService')
+      return { success: true, config: saveEmbeddingConfig(patch as any) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('embedding:test', async (_e, cfg: any) => {
+    try {
+      const { testEmbeddingConfig } = await import('../../services/ai/embeddingService')
+      return await testEmbeddingConfig(cfg)
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   ipcMain.handle('agent:generateTitle', async (_event, payload: {
     firstMessage: string
     modelConfig?: AgentProviderConfigOverride | null

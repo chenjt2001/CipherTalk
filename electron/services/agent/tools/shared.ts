@@ -5,6 +5,7 @@
  * 喂底层时按需换算；锚点 ref 的 createTime 原样透传（chatService 期望秒）。
  */
 import type { Message } from '../../chatService'
+import type { ChatSearchIndexHit } from '../../search/chatSearchIndexService'
 
 /** 归一到毫秒：秒级(<=1e12)自动 ×1000。无效返回 null。 */
 export function toMs(value?: number | null): number | null {
@@ -68,4 +69,74 @@ export function compactMessage(msg: Message, senderName?: string): CompactMessag
     sortSeq: msg.sortSeq,
     createTime: msg.createTime,
   }
+}
+
+export interface ChatSearchHit {
+  sessionId: string
+  time: string | null
+  sender: string
+  excerpt: string
+  anchor: { sessionId: string; localId: number; sortSeq: number; createTime: number }
+}
+
+/** 最近活跃的会话 username（只取真人/群，跳过公众号 gh_、聚合/虚拟会话）。检索与向量索引共用。 */
+export async function getRecentChatSessions(cap: number): Promise<string[]> {
+  const { chatService } = await import('../../chatService')
+  const res = await chatService.getSessions(0, cap)
+  return (res.success ? res.sessions || [] : [])
+    .map((s) => s.username)
+    .filter((u) => !!u && !u.startsWith('@') && !u.startsWith('gh_') && u !== 'brandsessionholder')
+}
+
+/**
+ * 关键词检索原微信聊天原文（基于 chatSearchIndexService 的本地 FTS 索引，按需构建）。
+ * 给 sessionId 则只搜该会话；否则遍历最近活跃的若干会话再合并（首次会建索引，稍慢）。
+ * memory_items 派生层已被移除，故检索一律走原文索引。
+ */
+export async function searchChat(opts: {
+  query: string
+  sessionId?: string
+  startTimeMs?: number
+  endTimeMs?: number
+  limit: number
+}): Promise<{ hits: ChatSearchHit[]; sessionsScanned: number }> {
+  const RECENT_SESSION_CAP = 20
+  const { chatSearchIndexService } = await import('../../search/chatSearchIndexService')
+
+  const targetSessions = opts.sessionId ? [opts.sessionId] : await getRecentChatSessions(RECENT_SESSION_CAP)
+
+  const perSession = Math.max(opts.limit, 10)
+  const raw: ChatSearchIndexHit[] = []
+  let sessionsScanned = 0
+  for (const sid of targetSessions) {
+    try {
+      const r = await chatSearchIndexService.searchSession({
+        sessionId: sid,
+        query: opts.query,
+        limit: perSession,
+        startTimeMs: opts.startTimeMs,
+        endTimeMs: opts.endTimeMs,
+      })
+      sessionsScanned += 1
+      raw.push(...r.hits)
+    } catch {
+      /* 单会话索引/检索失败则跳过 */
+    }
+  }
+
+  raw.sort((a, b) => b.score - a.score)
+  const top = raw.slice(0, opts.limit)
+  const senderMap = await resolveSenders(top.map((h) => h.message.senderUsername || ''))
+  const hits: ChatSearchHit[] = top.map((h) => {
+    const m = h.message
+    const sender = m.isSend === 1 ? '我' : senderMap.get(m.senderUsername || '') || m.senderUsername || '未知'
+    return {
+      sessionId: h.sessionId,
+      time: toLocalTime(m.createTime),
+      sender,
+      excerpt: String(h.excerpt || m.parsedContent || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+      anchor: { sessionId: h.sessionId, localId: m.localId, sortSeq: m.sortSeq, createTime: m.createTime },
+    }
+  })
+  return { hits, sessionsScanned }
 }

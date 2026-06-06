@@ -116,6 +116,15 @@ interface ConfigSchema {
       updatedAt: number
     }
   }
+  // 嵌入模型（语义/向量检索，独立于聊天模型）
+  embeddingConfig: {
+    enabled: boolean
+    protocol: 'openai-compatible' | 'openai'
+    apiKey: string
+    baseURL: string
+    model: string
+    dimension: number  // 0 = 未探测；测试连接成功后回填模型实际维度
+  }
   mcpEnabled: boolean
   mcpExposeMediaPaths: boolean
   mcpProxyPort: number
@@ -177,6 +186,14 @@ const defaults: ConfigSchema = {
   aiCurrentProvider: 'deepseek',
   aiProviderConfigs: {},  // 空对象，用户配置后填充
   aiProviderModelCache: {},
+  embeddingConfig: {
+    enabled: false,
+    protocol: 'openai-compatible',
+    apiKey: '',
+    baseURL: 'https://api.siliconflow.cn/v1',
+    model: 'BAAI/bge-m3',
+    dimension: 0,
+  },
   mcpEnabled: false,
   mcpExposeMediaPaths: true,
   mcpProxyPort: 5032,

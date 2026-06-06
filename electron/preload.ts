@@ -82,6 +82,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // 嵌入模型（语义/向量检索）
+  embedding: {
+    getConfig: () => ipcRenderer.invoke('embedding:getConfig') as Promise<{ success: boolean; config?: unknown; error?: string }>,
+    setConfig: (patch: unknown) => ipcRenderer.invoke('embedding:setConfig', patch) as Promise<{ success: boolean; config?: unknown; error?: string }>,
+    test: (cfg: unknown) => ipcRenderer.invoke('embedding:test', cfg) as Promise<{ success: boolean; dimension?: number; error?: string }>,
+  },
+
   // 数据库操作
   db: {
     open: (dbPath: string, key?: string) => ipcRenderer.invoke('db:open', dbPath, key),

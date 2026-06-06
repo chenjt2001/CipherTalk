@@ -433,7 +433,15 @@ export class WcdbService extends EventEmitter {
       const { proxyWcdbCall } = await import('./agent/wcdbProxyClient')
       return proxyWcdbCall<T>(type, payload)
     }
-    let result = await this.call<T>(type, payload)
+    let result: T
+    try {
+      result = await this.call<T>(type, payload)
+    } catch (e) {
+      if (!this.isRecoverableUtilityExit(e)) throw e
+      const reopened = await this.recoverAfterUtilityExit()
+      if (!reopened) throw e
+      return this.call<T>(type, payload)
+    }
     if (!this.isUninitializedResult(result)) return result
 
     const reopened = await this.ensureOpen()
@@ -445,6 +453,23 @@ export class WcdbService extends EventEmitter {
 
   private isUninitializedResult(result: any): boolean {
     return result?.success === false && typeof result?.error === 'string' && result.error.includes('WCDB 未初始化')
+  }
+
+  private isRecoverableUtilityExit(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error)
+    return (
+      message.includes('wcdb utility process exited') ||
+      message.includes('WCDB utility process 未就绪') ||
+      message.includes('utility postMessage 失败')
+    )
+  }
+
+  private async recoverAfterUtilityExit(): Promise<boolean> {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+    return this.ensureOpen()
   }
 
   private async ensureOpen(): Promise<boolean> {
