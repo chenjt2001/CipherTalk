@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync
 import { join } from 'path'
 import AdmZip from 'adm-zip'
 import type { AgentSkillContextItem } from './agent/types'
+import { rerankCandidates } from './ai/rerankService'
 
 type AdmZipFull = InstanceType<typeof AdmZip> & {
   getEntries(): Array<{ entryName: string }>
@@ -19,6 +20,7 @@ export type SkillInfo = {
 const BUILTIN_SKILLS = new Set(['ct-mcp-copilot'])
 const DEFAULT_AGENT_SKILL_LIMIT = 3
 const DEFAULT_AGENT_SKILL_BUDGET = 9000
+const DEFAULT_AGENT_SKILL_CANDIDATES = 20
 
 function parseSkillFrontmatter(content: string): { name: string; version: string; description: string } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
@@ -342,11 +344,11 @@ export class SkillManagerService {
     }
   }
 
-  selectSkillsForAgent(
+  async selectSkillsForAgent(
     query: string,
     limit = DEFAULT_AGENT_SKILL_LIMIT,
     totalBudget = DEFAULT_AGENT_SKILL_BUDGET,
-  ): AgentSkillContextItem[] {
+  ): Promise<AgentSkillContextItem[]> {
     const safeLimit = Math.max(0, Math.floor(limit))
     if (!query.trim() || safeLimit === 0 || totalBudget <= 0) return []
 
@@ -369,11 +371,15 @@ export class SkillManagerService {
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item))
       .sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
-      .slice(0, safeLimit)
+      .slice(0, DEFAULT_AGENT_SKILL_CANDIDATES)
+
+    const { items: reranked } = await rerankCandidates(query, scored, {
+      topN: safeLimit,
+    })
 
     const selected: AgentSkillContextItem[] = []
     let remaining = Math.max(0, Math.floor(totalBudget))
-    for (const item of scored) {
+    for (const item of reranked) {
       if (remaining <= 0) break
       const perSkillBudget = Math.max(1200, Math.floor(remaining / Math.max(1, safeLimit - selected.length)))
       const content = compactSkillContent(item.skill.rawContent, Math.min(remaining, perSkillBudget))

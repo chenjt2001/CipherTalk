@@ -315,7 +315,7 @@ function collectMatchedByBadges(value: unknown, badges: string[]) {
 }
 
 function collectRetrievalBadges(toolName: string, output: unknown): string[] {
-  if (toolName !== 'semantic_search' && toolName !== 'recall') return []
+  if (toolName !== 'semantic_search' && toolName !== 'recall' && toolName !== 'search_messages') return []
   const obj = asRecord(output)
   if (!obj) return []
   const retrieval = asRecord(obj.retrieval)
@@ -328,8 +328,11 @@ function collectRetrievalBadges(toolName: string, output: unknown): string[] {
   pushBadge(badges, RETRIEVAL_MODE_LABELS[mode] || (mode ? `召回: ${mode}` : undefined))
   const fallbackReason = typeof retrieval?.fallbackReason === 'string' ? retrieval.fallbackReason : ''
   pushBadge(badges, RETRIEVAL_FALLBACK_LABELS[fallbackReason])
+  const rerank = asRecord(retrieval?.rerank)
+  if (rerank?.applied === true) pushBadge(badges, '重排: 已应用')
+  else if (rerank?.enabled === true) pushBadge(badges, '重排: 已回退')
   collectMatchedByBadges(toolName === 'recall' ? obj.memories : obj.hits, badges)
-  return badges.slice(0, 4)
+  return badges.slice(0, 5)
 }
 
 // ====== @ 提及（聚焦某个联系人/群的数据）======

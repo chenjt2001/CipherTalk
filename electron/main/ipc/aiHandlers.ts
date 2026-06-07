@@ -57,8 +57,22 @@ export function registerAiHandlers(_ctx: MainProcessContext): void {
       const { mcpClientService } = await import('../../services/mcpClientService')
       const { buildReadOnlyMcpToolDescriptors } = await import('../../services/agent/mcpToolPolicy')
       const { skillManagerService } = await import('../../services/skillManagerService')
-      const mcpTools = buildReadOnlyMcpToolDescriptors(mcpClientService.getConnectedToolSchemas())
-      const skills = skillManagerService.selectSkillsForAgent(lastUserText)
+      const { rerankCandidates } = await import('../../services/ai/rerankService')
+      const readOnlyMcpTools = buildReadOnlyMcpToolDescriptors(mcpClientService.getConnectedToolSchemas())
+      const mcpTools = (await rerankCandidates(
+        lastUserText,
+        readOnlyMcpTools.map((tool) => ({
+          item: tool,
+          text: [
+            `MCP ${tool.serverName}/${tool.toolName}`,
+            tool.name,
+            tool.description || '',
+            tool.inputSchema ? JSON.stringify(tool.inputSchema).slice(0, 1000) : '',
+          ].filter(Boolean).join('\n'),
+        })),
+        { topN: 8 },
+      )).items
+      const skills = await skillManagerService.selectSkillsForAgent(lastUserText)
       if (mcpTools.length > 0 || skills.length > 0) {
         console.info('[agent:run] injected context', {
           mcpTools: mcpTools.map((tool) => `${tool.serverName}/${tool.toolName}`),
@@ -234,6 +248,36 @@ export function registerAiHandlers(_ctx: MainProcessContext): void {
         if (!sender.isDestroyed()) sender.send('embedding:buildProgress', progress)
       })
       return { success: true, indexed }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  // ========= 重排模型（RAG/Skills/MCP 候选重排）=========
+  ipcMain.handle('rerank:getConfig', async () => {
+    try {
+      const { getRerankConfig } = await import('../../services/ai/rerankService')
+      return { success: true, config: getRerankConfig() }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('rerank:setConfig', async (_e, patch: Record<string, unknown>) => {
+    try {
+      const { saveRerankConfig } = await import('../../services/ai/rerankService')
+      return { success: true, config: saveRerankConfig(patch as any) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('rerank:test', async (_e, cfg: any) => {
+    try {
+      const { testRerankConfig } = await import('../../services/ai/rerankService')
+      const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
+      await refreshResolvedProxyUrl()
+      return await testRerankConfig(cfg)
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }

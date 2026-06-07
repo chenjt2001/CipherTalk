@@ -13,6 +13,7 @@ import type { MemoryItem } from '../../memory/memorySchema'
 import { memoryDatabase, hashMemoryContent } from '../../memory/memoryDatabase'
 import { createLanguageModel } from '../provider'
 import { embedQuery, embedTexts, getEmbeddingConfig, type EmbeddingConfig } from '../../ai/embeddingService'
+import { rerankCandidates, type RerankMeta } from '../../ai/rerankService'
 import { reciprocalRankFusion } from '../../retrieval/rrf'
 
 /** 开场注入的画像/会话事实条数上限；先取 SCAN_LIMIT 再按 importance 排序截断。 */
@@ -82,6 +83,7 @@ function formatRecall(
     vectorIds?: Set<number>
     keywordCount?: number
     vectorCount?: number
+    rerank?: RerankMeta
   },
 ) {
   const keywordIds = opts.keywordIds || new Set<number>()
@@ -94,6 +96,7 @@ function formatRecall(
       fallbackReason: opts.fallbackReason,
       keywordCount: opts.keywordCount ?? keywordIds.size,
       vectorCount: opts.vectorCount ?? vectorIds.size,
+      rerank: opts.rerank,
     },
     count: items.length,
     memories: items.map((m) => ({
@@ -157,9 +160,10 @@ export function createRecall(scope: AgentScope) {
     execute: async ({ query, about, limit }) => {
       try {
         const sessionId = resolveAbout(about, scope)
+        const candidateLimit = Math.min(50, Math.max(limit, limit * 3))
         const filter = { ...(sessionId ? { sessionId } : {}), sourceTypes: VECTOR_KINDS }
         // 关键词路：始终算（也作为向量不可用时的回退）
-        const keywordHits = memoryDatabase.searchMemoryItemsByKeyword({ query, ...filter, limit: limit * 2 })
+        const keywordHits = memoryDatabase.searchMemoryItemsByKeyword({ query, ...filter, limit: candidateLimit })
         const keywordIds = new Set(keywordHits.map((h) => h.item.id))
 
         const cfg = getEmbeddingConfig()
@@ -169,7 +173,7 @@ export function createRecall(scope: AgentScope) {
           try {
             await ensureMemoryVectors(cfg, sessionId)
             const queryVec = await embedQuery(query, cfg)
-            const vectorHits = memoryDatabase.searchMemoryVectors(queryVec, cfg.model, { ...filter, limit: limit * 2 })
+            const vectorHits = memoryDatabase.searchMemoryVectors(queryVec, cfg.model, { ...filter, limit: candidateLimit })
             const vectorIds = new Set(vectorHits.map((h) => h.item.id))
             if (vectorHits.length > 0) {
               // 向量 + 关键词按排名 RRF 融合（key=记忆 id）
@@ -180,12 +184,22 @@ export function createRecall(scope: AgentScope) {
                 ],
                 (item) => String(item.id),
               )
-              return formatRecall(merged.slice(0, limit).map((m) => m.item), 'hybrid', {
+              const mergedItems = merged.slice(0, candidateLimit).map((m) => m.item)
+              const { items, meta: rerankMeta } = await rerankCandidates(
+                query,
+                mergedItems.map((item) => ({
+                  item,
+                  text: [item.title, item.content, item.tags?.join(' ')].filter(Boolean).join('\n'),
+                })),
+                { topN: limit },
+              )
+              return formatRecall(items, 'hybrid', {
                 embeddingReady,
                 keywordIds,
                 vectorIds,
                 keywordCount: keywordHits.length,
                 vectorCount: vectorHits.length,
+                rerank: rerankMeta,
               })
             }
           } catch {
@@ -193,13 +207,23 @@ export function createRecall(scope: AgentScope) {
             fallbackReason = 'vector_error'
           }
         }
-        return formatRecall(keywordHits.slice(0, limit).map((h) => h.item), 'keyword', {
+        const keywordItems = keywordHits.slice(0, candidateLimit).map((h) => h.item)
+        const { items, meta: rerankMeta } = await rerankCandidates(
+          query,
+          keywordItems.map((item) => ({
+            item,
+            text: [item.title, item.content, item.tags?.join(' ')].filter(Boolean).join('\n'),
+          })),
+          { topN: limit },
+        )
+        return formatRecall(items, 'keyword', {
           embeddingReady,
           fallbackReason,
           keywordIds,
           vectorIds: new Set<number>(),
           keywordCount: keywordHits.length,
           vectorCount: 0,
+          rerank: rerankMeta,
         })
       } catch (e) {
         return { error: e instanceof Error ? e.message : String(e) }

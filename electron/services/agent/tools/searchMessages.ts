@@ -5,6 +5,7 @@
  */
 import { tool } from 'ai'
 import { z } from 'zod'
+import { rerankCandidates } from '../../ai/rerankService'
 import { evidenceFromHit, searchChat } from './shared'
 
 export const searchMessages = tool({
@@ -22,8 +23,21 @@ export const searchMessages = tool({
   }),
   execute: async ({ query, sessionId, startTimeMs, endTimeMs, limit }) => {
     try {
-      const { hits, sessionsScanned, coverage } = await searchChat({ query, sessionId, startTimeMs, endTimeMs, limit })
+      const candidateLimit = Math.min(50, Math.max(limit, limit * 3))
+      const { hits: rawHits, sessionsScanned, coverage } = await searchChat({ query, sessionId, startTimeMs, endTimeMs, limit: candidateLimit })
+      const { items: hits, meta: rerankMeta } = await rerankCandidates(
+        query,
+        rawHits.map((hit) => ({
+          item: hit,
+          text: [hit.time, hit.sender, hit.excerpt].filter(Boolean).join('\n'),
+        })),
+        { topN: limit },
+      )
       return {
+        retrieval: {
+          mode: 'keyword',
+          rerank: rerankMeta,
+        },
         sessionsScanned,
         coverage,
         scope: sessionId ? 'session' : 'recent_sessions',

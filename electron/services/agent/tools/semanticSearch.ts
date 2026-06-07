@@ -7,6 +7,7 @@
  */
 import { tool } from 'ai'
 import { z } from 'zod'
+import { rerankCandidates } from '../../ai/rerankService'
 import { reciprocalRankFusion } from '../../retrieval/rrf'
 import { reportAgentProgress } from '../progress'
 import { evidenceFromHit, searchChat, resolveSenders, toLocalTime } from './shared'
@@ -42,6 +43,7 @@ export const semanticSearch = tool({
   }),
   execute: async ({ query, sessionId, startTimeMs, endTimeMs, limit }) => {
     try {
+      const candidateLimit = Math.min(50, Math.max(limit, limit * 3))
       const { getEmbeddingConfig } = await import('../../ai/embeddingService')
       const { messageVectorService, embedQuery } = await import('../../search/messageVectorService')
       const cfg = getEmbeddingConfig()
@@ -66,9 +68,9 @@ export const semanticSearch = tool({
               sessionId,
               indexedCount: indexed,
             })
-            return { hits: messageVectorService.searchSession(sessionId, queryVec, limit), indexed }
+            return { hits: messageVectorService.searchSession(sessionId, queryVec, candidateLimit), indexed }
           })(),
-          searchChat({ query, sessionId, startTimeMs, endTimeMs, limit }),
+          searchChat({ query, sessionId, startTimeMs, endTimeMs, limit: candidateLimit }),
         ])
 
         const senderMap = await resolveSenders(vector.hits.map((h) => h.senderUsername || ''))
@@ -108,7 +110,7 @@ export const semanticSearch = tool({
           (item) => item.key,
         )
 
-        const hits = merged.slice(0, limit).map((m) => ({
+        const mergedHits = merged.slice(0, candidateLimit).map((m) => ({
           sessionId: m.item.sessionId,
           time: m.item.time,
           sender: m.item.sender,
@@ -117,6 +119,14 @@ export const semanticSearch = tool({
           matchedBy: m.ranks.length >= 2 ? 'both' : m.item.source,
           anchor: m.item.anchor,
         }))
+        const { items: hits, meta: rerankMeta } = await rerankCandidates(
+          query,
+          mergedHits.map((hit) => ({
+            item: hit,
+            text: [hit.time, hit.sender, hit.excerpt, hit.matchedBy].filter(Boolean).join('\n'),
+          })),
+          { topN: limit },
+        )
 
         return {
           mode: 'hybrid',
@@ -125,6 +135,7 @@ export const semanticSearch = tool({
             embeddingReady: true,
             vectorCount: vector.hits.length,
             keywordCount: keyword.hits.length,
+            rerank: rerankMeta,
           },
           indexedVectors: vector.indexed,
           hits,
@@ -140,7 +151,15 @@ export const semanticSearch = tool({
       }
 
       // 关键词回退（全局 / 未配嵌入）
-      const { hits, sessionsScanned, coverage } = await searchChat({ query, sessionId, startTimeMs, endTimeMs, limit })
+      const { hits: rawHits, sessionsScanned, coverage } = await searchChat({ query, sessionId, startTimeMs, endTimeMs, limit: candidateLimit })
+      const { items: hits, meta: rerankMeta } = await rerankCandidates(
+        query,
+        rawHits.map((hit) => ({
+          item: hit,
+          text: [hit.time, hit.sender, hit.excerpt].filter(Boolean).join('\n'),
+        })),
+        { topN: limit },
+      )
       return {
         mode: 'keyword',
         retrieval: {
@@ -148,7 +167,8 @@ export const semanticSearch = tool({
           embeddingReady,
           fallbackReason: semanticFallbackReason(sessionId, embeddingReady),
           vectorCount: 0,
-          keywordCount: hits.length,
+          keywordCount: rawHits.length,
+          rerank: rerankMeta,
         },
         sessionsScanned,
         coverage,

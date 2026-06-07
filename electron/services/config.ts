@@ -127,6 +127,16 @@ interface ConfigSchema {
     model: string
     dimension: number  // 0 = 未探测；测试连接成功后回填模型实际维度
   }
+  // 重排模型（RAG/Skills/MCP 候选重排，独立于聊天模型与嵌入模型）
+  rerankConfig: {
+    enabled: boolean
+    provider: string
+    protocol: 'openai-compatible'
+    apiKey: string
+    baseURL: string
+    model: string
+    timeoutMs: number
+  }
   // 主进程探测到的系统代理 URL（写入后供 AI 子进程/嵌入跨进程读取；子进程无 session API 探测不了）
   aiResolvedProxyUrl: string
   mcpEnabled: boolean
@@ -199,6 +209,15 @@ const defaults: ConfigSchema = {
     baseURL: 'https://api.siliconflow.cn/v1',
     model: 'BAAI/bge-m3',
     dimension: 0,
+  },
+  rerankConfig: {
+    enabled: false,
+    provider: '',
+    protocol: 'openai-compatible',
+    apiKey: '',
+    baseURL: 'https://api.siliconflow.cn/v1',
+    model: 'BAAI/bge-reranker-v2-m3',
+    timeoutMs: 15000,
   },
   aiResolvedProxyUrl: '',
   mcpEnabled: false,

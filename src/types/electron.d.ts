@@ -12,6 +12,16 @@ export interface EmbeddingConfig {
   dimension: number
 }
 
+export interface RerankConfig {
+  enabled: boolean
+  provider: string
+  protocol: 'openai-compatible'
+  apiKey: string
+  baseURL: string
+  model: string
+  timeoutMs: number
+}
+
 export interface EmbeddingBuildProgress {
   sessionId: string
   stage: 'loading' | 'chunking' | 'embedding' | 'done'
@@ -985,6 +995,11 @@ export interface ElectronAPI {
     sessionStatus: (sessionId: string) => Promise<{ success: boolean; enabled?: boolean; count?: number; store?: EmbeddingVectorStoreInfo; error?: string }>
     buildSession: (sessionId: string) => Promise<{ success: boolean; indexed?: number; error?: string }>
     onBuildProgress: (callback: (progress: EmbeddingBuildProgress) => void) => () => void
+  }
+  rerank: {
+    getConfig: () => Promise<{ success: boolean; config?: RerankConfig; error?: string }>
+    setConfig: (patch: Partial<RerankConfig>) => Promise<{ success: boolean; config?: RerankConfig; error?: string }>
+    test: (cfg: RerankConfig) => Promise<{ success: boolean; error?: string }>
   }
   // AI 接入
   ai: {

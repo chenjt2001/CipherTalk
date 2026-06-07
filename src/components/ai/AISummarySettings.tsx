@@ -35,6 +35,7 @@ import { cn } from '../../lib/utils'
 import { useSettingsStore } from '../settings/settingsStore'
 import AIProviderLogo from './AIProviderLogo'
 import EmbeddingTab from '../settings/tabs/EmbeddingTab'
+import RerankTab from '../settings/tabs/RerankTab'
 
 type AiProviderProtocol = configService.AiProviderProtocol
 type PresetTab = 'name' | 'provider' | 'config'
@@ -314,7 +315,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
   const [remoteModelDetails, setRemoteModelDetails] = useState<AIModelInfo[]>([])
   const [modelListError, setModelListError] = useState('')
   const [presets, setPresets] = useState<configService.AiConfigPreset[]>([])
-  const [configMode, setConfigMode] = useState<'llm' | 'vector'>('llm')
+  const [configMode, setConfigMode] = useState<'llm' | 'vector' | 'rerank'>('llm')
   const [showPresetDrawer, setShowPresetDrawer] = useState(false)
   const [showSavePresetDialog, setShowSavePresetDialog] = useState(false)
   const [presetName, setPresetName] = useState('')
@@ -758,19 +759,20 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                 </Button>
               </>
             )}
-            {/* 大模型 / 向量 切换：同一套 UI 配置不同对象 */}
-            <Tabs className="shrink-0" selectedKey={configMode} onSelectionChange={(key) => setConfigMode(key as 'llm' | 'vector')}>
+            {/* 大模型 / 向量 / 重排 切换：同一套 UI 配置不同对象 */}
+            <Tabs className="shrink-0" selectedKey={configMode} onSelectionChange={(key) => setConfigMode(key as 'llm' | 'vector' | 'rerank')}>
               <Tabs.ListContainer>
                 <Tabs.List aria-label="配置类型">
                   <Tabs.Tab className="whitespace-nowrap" id="llm">大模型<Tabs.Indicator /></Tabs.Tab>
                   <Tabs.Tab className="whitespace-nowrap" id="vector">向量<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.Tab className="whitespace-nowrap" id="rerank">重排<Tabs.Indicator /></Tabs.Tab>
                 </Tabs.List>
               </Tabs.ListContainer>
             </Tabs>
           </div>
         </div>
 
-        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_330px]" style={{ display: configMode === 'vector' ? 'none' : undefined }}>
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_330px]" style={{ display: configMode !== 'llm' ? 'none' : undefined }}>
           <Card>
             <Card.Header className="flex-row items-start justify-between gap-4">
               <div className="min-w-0">
@@ -1011,6 +1013,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
           </aside>
         </div>
         {configMode === 'vector' && <EmbeddingTab />}
+        {configMode === 'rerank' && <RerankTab />}
       </div>
 
       {settingsPagePortalHost && createPortal(
