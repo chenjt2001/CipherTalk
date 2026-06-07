@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/aie-button";
 import { cn } from "@/lib/utils";
 import { ArrowDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
@@ -13,8 +13,8 @@ export type ConversationProps = ComponentProps<typeof StickToBottom>;
 export const Conversation = ({ className, ...props }: ConversationProps) => (
   <StickToBottom
     className={cn("relative flex-1 overflow-y-hidden", className)}
-    initial="smooth"
-    resize="smooth"
+    initial="instant"
+    resize="instant"
     role="log"
     {...props}
   />
@@ -87,6 +87,30 @@ export const ConversationEmptyState = ({
 
 export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
 
+export type ConversationAutoScrollProps = {
+  enabled?: boolean;
+  trigger: unknown;
+};
+
+export const ConversationAutoScroll = ({
+  enabled = true,
+  trigger,
+}: ConversationAutoScrollProps) => {
+  const { scrollToBottom } = useStickToBottomContext();
+  const didMountRef = useRef(false);
+
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    if (!enabled) return;
+    void scrollToBottom({ animation: "instant", ignoreEscapes: true });
+  }, [enabled, scrollToBottom, trigger]);
+
+  return null;
+};
+
 export const ConversationScrollButton = ({
   className,
   ...props
@@ -100,12 +124,14 @@ export const ConversationScrollButton = ({
   return (
     !isAtBottom && (
       <Button
+        aria-label="回到最新消息"
         className={cn(
-          "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-(--agent-radius,12px)",
+          "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-(--agent-radius,12px) border-border bg-background/90 shadow-sm backdrop-blur",
           className
         )}
         onClick={handleScrollToBottom}
         size="icon"
+        title="回到最新消息"
         type="button"
         variant="outline"
         {...props}

@@ -11,6 +11,7 @@ import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-element
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import {
   Conversation,
+  ConversationAutoScroll,
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton,
@@ -1636,6 +1637,7 @@ export default function AgentPage() {
         </div>
       </div>
       <Conversation className="min-h-0 flex-1">
+        <ConversationAutoScroll enabled={status === 'submitted'} trigger={messages.length} />
         <ConversationContent className="mx-auto w-full min-w-80 max-w-[82%] py-4">
           {messages.length === 0 ? (
             <ConversationEmptyState
