@@ -116,6 +116,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     scope?: AgentScope
     modelConfig?: AgentProviderConfigOverride | null
     conversationId?: number | null
+    planMode?: boolean
   }) => {
     const sender = event.sender
     const { runId } = payload
@@ -235,7 +236,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         elapsedMs: Date.now() - startedAt,
       })
       await agentProcessService.run(
-        { messages, providerConfig, scope, mcpTools, skills },
+        { messages, providerConfig, scope, mcpTools, skills, planMode: payload.planMode === true },
         (chunk) => {
           chunkCount += 1
           lastActivityAt = Date.now()

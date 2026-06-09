@@ -67,6 +67,16 @@ const MEMORY_PROMPT = `
 
 const BASE_PROMPT = [ROLE_PROMPT, TOOL_PROMPT, ROUTING_PROMPT, EVIDENCE_PROMPT, MEMORY_PROMPT].join('\n')
 
+/** 计划模式系统提示：开启时追加到 dynamicSystem，让本轮只产出计划、不下结论（见 engine.ts）。 */
+export const PLAN_MODE_PROMPT = `
+# 计划模式（已开启）
+用户开启了"计划模式"，本轮你只制定执行计划，不给出最终结论：
+- 先理解问题。确有必要才调用极少量只读工具（如 list_contacts 解析人名）把计划写具体；不要在本轮做实质分析，不要调用 delegate_analysis，不要大量检索或读时间线。
+- 用简洁的 Markdown 有序列表给出执行计划：每一步写清"打算用哪个工具、查什么范围、想得到什么"；必要时点出难点或需要用户先确认的地方。
+- 计划结尾用一句话提示用户：确认无误后点击下方"开始执行"，或直接回复修改意见来调整计划。
+- 即使请求超出工具范围（如需要外部/实时数据，工具只能查本地聊天记录），也用"计划"的形式回应：先列出能用聊天记录做到的部分，再明确标注哪部分数据拿不到，而不是直接拒绝。
+- 本轮严禁直接给出问题的最终答案或结论。`
+
 function buildSkillPrompt(skills: AgentSkillContextItem[] = []): string {
   if (skills.length === 0) return ''
   const blocks = skills.map((skill, index) => (

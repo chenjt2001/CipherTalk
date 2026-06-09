@@ -86,6 +86,8 @@ export interface AgentRunInput {
   scope: AgentScope
   mcpTools?: AgentMcpToolDescriptor[]
   skills?: AgentSkillContextItem[]
+  /** 计划模式：开启后本轮只制定执行计划、不给最终结论（见 prompts.ts PLAN_MODE_PROMPT）。 */
+  planMode?: boolean
 }
 
 // ========= 主进程 ↔ AI 子进程 postMessage 协议 =========

@@ -5,7 +5,7 @@
 import { generateText, ToolLoopAgent, stepCountIs, type ModelMessage, type UIMessageChunk } from 'ai'
 import type { SystemModelMessage } from '@ai-sdk/provider-utils'
 import { createLanguageModel } from './provider'
-import { buildAgentPromptParts } from './prompts'
+import { buildAgentPromptParts, PLAN_MODE_PROMPT } from './prompts'
 import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderOptions } from './cache'
 import { buildTools } from './tools'
 import { buildMemoryContext, extractMemories, preloadRelevantMemories } from './tools/memory'
@@ -26,7 +26,12 @@ export function buildAgentInstructions(
   tools: ReturnType<typeof buildTools>,
 ): { instructions: SystemModelMessage[]; tools: ReturnType<typeof buildTools>; promptCacheKey: string } {
   const promptParts = buildAgentPromptParts(input.scope, input.skills)
-  const dynamicSystem = [promptParts.dynamicSystem, memoryContext, relevantMemoryContext].filter(Boolean).join('\n')
+  const dynamicSystem = [
+    promptParts.dynamicSystem,
+    input.planMode ? PLAN_MODE_PROMPT : '',
+    memoryContext,
+    relevantMemoryContext,
+  ].filter(Boolean).join('\n')
   const instructions: SystemModelMessage[] = [
     { role: 'system', content: promptParts.cacheableSystem },
     ...(dynamicSystem ? [{ role: 'system' as const, content: dynamicSystem }] : []),
@@ -215,6 +220,7 @@ export async function runAgent(
           rawFinishReason: part.rawFinishReason,
           modelProvider: input.providerConfig.name,
           modelId: input.providerConfig.model,
+          ...(input.planMode ? { planMode: true } : {}),
         }
       },
     })) {

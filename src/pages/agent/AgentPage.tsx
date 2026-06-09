@@ -5,8 +5,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type UIEvent } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { isToolUIPart, type ChatStatus, type UIMessage } from 'ai'
-import { Button as HeroButton, ButtonGroup, Dropdown, Label, Modal, Separator, Surface, Table } from '@heroui/react'
-import { AtSign, BarChart3, Braces, Brain, CheckIcon, ChevronDown, Clock3, Code2, Copy, FileText, History, Image as ImageIcon, Info, Link2, PenLine, Quote, RefreshCcw, Search, Slash, SquarePen, Table2, Trash2, Users, Volume2, Wrench, X, Sparkles } from 'lucide-react'
+import { Button as HeroButton, ButtonGroup, Dropdown, Label, Modal, Separator, Surface, Switch, Table } from '@heroui/react'
+import { AtSign, BarChart3, Braces, Brain, CheckIcon, ChevronDown, Clock3, Code2, Copy, FileText, History, Image as ImageIcon, Info, Link2, ListChecks, PenLine, Play, Quote, RefreshCcw, Search, Slash, SquarePen, Table2, Trash2, Users, Volume2, Wrench, X, Sparkles } from 'lucide-react'
 import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import {
@@ -186,6 +186,33 @@ const ModelItem = memo(
   }
 )
 ModelItem.displayName = 'ModelItem'
+
+// 计划模式专用：把"执行计划"正文装进单独的可折叠卡片，默认收起，点击标题展开看详情。
+function PlanCard({ text, streaming }: { text: string; streaming: boolean }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="my-1.5 overflow-hidden rounded-xl border border-border bg-surface">
+      <button
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left font-medium text-sm hover:bg-muted/40"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        <ListChecks className="size-4 shrink-0 text-muted-foreground" />
+        <span>执行计划</span>
+        {streaming
+          ? <span className="font-normal text-muted-foreground text-xs">生成中…</span>
+          : <span className="font-normal text-muted-foreground text-xs">{open ? '点击收起' : '点击展开查看详情'}</span>}
+        <ChevronDown className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="border-border border-t px-3 py-2">
+          <MessageResponse isStreaming={streaming}>{text}</MessageResponse>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function MessageChainOfThought({ active, children }: { active: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(active)
@@ -1099,6 +1126,8 @@ type AgentMessageMetadata = {
   rawFinishReason?: string
   modelProvider?: string
   modelId?: string
+  /** 计划模式生成的消息：正文是"执行计划"，前端用可折叠卡片展示（默认收起）。 */
+  planMode?: boolean
   ciphertalk?: {
     subAgentProgress?: AgentProgressEvent[]
     toolElapsed?: Record<string, number>
@@ -1481,6 +1510,12 @@ export default function AgentPage() {
   const [providersInfo, setProvidersInfo] = useState<AIProviderInfo[]>([])
   const [selectedPresetId, setSelectedPresetId] = useState('current')
   const [reasoningEffort, setReasoningEffort] = useState<AgentReasoningEffort>('auto')
+  // 计划模式：开启后本轮只出执行计划、不下结论，等用户点"开始执行"再跑（参考 ClaudeCode/Codex）
+  const [planMode, setPlanMode] = useState(false)
+  const planModeRef = useRef(planMode)
+  planModeRef.current = planMode
+  // 标记当前在途的这次运行是否为计划模式（finish 前 metadata 还没回来，流式期间靠它判定计划卡片）
+  const runIsPlanRef = useRef(false)
   const [currentProviderId, setCurrentProviderId] = useState('')
   const [currentModelId, setCurrentModelId] = useState('')
   const [toolElapsedByKey, setToolElapsedByKey] = useState<Record<string, number>>({})
@@ -1647,6 +1682,7 @@ export default function AgentPage() {
       () => selectedModelConfigRef.current,
       () => conversationIdRef.current,
       handleAgentProgress,
+      () => planModeRef.current,
     ),
     [handleAgentProgress]
   )
@@ -2008,6 +2044,7 @@ export default function AgentPage() {
         : { kind: 'global' }
     activeScopeRef.current = submitScope
     submitScopeRef.current = submitScope
+    runIsPlanRef.current = planModeRef.current
     setAgentNotice('')
     setAgentProgress([{ stage: 'run_started', title: AGENT_PENDING_TITLE, detail: '正在创建会话并准备上下文', at: Date.now() }])
     setAgentRunPending(true)
@@ -2058,6 +2095,7 @@ export default function AgentPage() {
     setAgentProgress([{ stage: 'run_started', title: AGENT_PENDING_TITLE, detail: '正在重新生成回答', at: Date.now() }])
     setAgentRunPending(true)
     setSubAgentProgress([])
+    runIsPlanRef.current = planModeRef.current
     submitScopeRef.current = activeScopeRef.current
     setMessages(messages.slice(0, userIndex))
 
@@ -2067,6 +2105,24 @@ export default function AgentPage() {
     })
     void sendPromise
   }, [busy, messages, selectedModelSupportsTools, sendMessage, setMessages])
+
+  // 计划模式确认：关闭计划模式并让 Agent 按上一条计划开始执行（沿用当前会话 scope）
+  const handleExecutePlan = useCallback(() => {
+    if (busy || !selectedModelSupportsTools) return
+    planModeRef.current = false
+    runIsPlanRef.current = false
+    setPlanMode(false)
+    setAgentNotice('')
+    setAgentProgress([{ stage: 'run_started', title: AGENT_PENDING_TITLE, detail: '正在按计划执行', at: Date.now() }])
+    setAgentRunPending(true)
+    setSubAgentProgress([])
+    submitScopeRef.current = activeScopeRef.current
+    const sendPromise = Promise.resolve(sendMessage({ text: '请按上面的计划开始执行，直接给出最终结果，不要再重复计划。', files: [] })).finally(() => {
+      submitScopeRef.current = null
+      setAgentRunPending(false)
+    })
+    void sendPromise
+  }, [busy, selectedModelSupportsTools, sendMessage])
 
   const handleModelSelect = useCallback((id: string) => {
     if (models.find((model) => model.id === id)?.disabled) return
@@ -2249,7 +2305,7 @@ export default function AgentPage() {
       </div>
       <Conversation className="min-h-0 flex-1">
         <ConversationAutoScroll enabled={shouldAnchorLatestUser} trigger={latestUserMessageId} />
-        <ConversationContent className="mx-auto w-full min-w-80 max-w-[82%] py-4">
+        <ConversationContent className="mx-auto w-full min-w-80 max-w-[82%] pt-4 pb-12">
           {messages.length === 0 ? (
             <ConversationEmptyState
               title="开始查询聊天记录"
@@ -2264,6 +2320,12 @@ export default function AgentPage() {
               const chainActive = isLastMessage && busy
               const assistantText = message.role === 'assistant' ? messageTextOf(message) : ''
               const assistantTextStreaming = message.role === 'assistant' && isLastMessage && status === 'streaming'
+              // 计划模式生成的消息：正文(执行计划)走 PlanCard 折叠卡片，不再走普通 Markdown 渲染。
+              // 完成后看 metadata.planMode；流式期间 metadata 还没回来，靠在途标记 runIsPlanRef 判定。
+              const isPlanMessage = message.role === 'assistant' && (
+                (message.metadata as AgentMessageMetadata | undefined)?.planMode === true
+                || (isLastMessage && busy && runIsPlanRef.current)
+              )
               const outputActivity = message.role === 'assistant'
                 ? analyzeMessageRenderActivity(assistantText, assistantTextStreaming)
                 : null
@@ -2344,8 +2406,13 @@ export default function AgentPage() {
                         })}
                       </MessageChainOfThought>
                     )}
+                    {isPlanMessage && assistantText && (
+                      <PlanCard streaming={assistantTextStreaming} text={assistantText} />
+                    )}
                     {message.parts.map((part, index) => {
                       if (part.type === 'text') {
+                        // 计划消息的正文已经在 PlanCard 里展示，这里不再重复渲染。
+                        if (isPlanMessage) return null
                         const displayText = userDisplay?.textByPartIndex.get(index) ?? part.text
                         if (!displayText) return null
                         return (
@@ -2380,6 +2447,20 @@ export default function AgentPage() {
                         speaking={speakingMessageId === message.id}
                       />
                     )}
+                    {isPlanMessage && isLastMessage && !busy && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <HeroButton
+                          isDisabled={!selectedModelSupportsTools}
+                          onPress={handleExecutePlan}
+                          size="sm"
+                          variant="primary"
+                        >
+                          <Play className="size-3.5" />
+                          开始执行
+                        </HeroButton>
+                        <span className="text-muted-foreground text-xs">确认计划后点此执行，或直接回复修改计划</span>
+                      </div>
+                    )}
                   </MessageContent>
                 </Message>
               )
@@ -2403,11 +2484,11 @@ export default function AgentPage() {
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="shrink-0">
+      <div className="shrink-0 pt-2 pb-4">
         <PromptInputProvider>
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv"
-            className="mx-auto mb-1.5 w-full min-w-80 max-w-[82%] **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-xs"
+            className="mx-auto mb-2 w-full min-w-80 max-w-[82%] **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-xs"
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple
@@ -2443,12 +2524,41 @@ export default function AgentPage() {
                     <PromptInputActionMenuTrigger aria-label="更多输入操作" variant="tertiary" />
                     <PromptInputActionMenuContent>
                       <PromptInputActionAddAttachments label="添加图片或文件" />
+                      <Dropdown.Item
+                        id="plan-mode"
+                        textValue="计划模式"
+                        onAction={() => setPlanMode((value) => !value)}
+                      >
+                        <ListChecks className="size-4 shrink-0 text-muted" />
+                        <Label>计划模式</Label>
+                        <span className="ml-auto inline-flex pointer-events-none">
+                          <Switch aria-label="计划模式" isSelected={planMode}>
+                            <Switch.Control>
+                              <Switch.Thumb />
+                            </Switch.Control>
+                          </Switch>
+                        </span>
+                      </Dropdown.Item>
                     </PromptInputActionMenuContent>
                   </PromptInputActionMenu>
                   <SlashPresetButton showGroupSeparator />
                   <MentionTriggerButton showGroupSeparator />
                   <PromptInputSpeechButton aria-label="语音输入" language="zh-CN" showGroupSeparator variant="tertiary" />
                 </ButtonGroup>
+
+                {planMode && (
+                  <HeroButton
+                    aria-label="关闭计划模式"
+                    className="gap-1"
+                    onPress={() => setPlanMode(false)}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    <ListChecks className="size-3.5" />
+                    计划模式
+                    <X className="size-3" />
+                  </HeroButton>
+                )}
 
                 <Separator orientation="vertical" variant="tertiary" />
 
@@ -2520,7 +2630,7 @@ export default function AgentPage() {
           </PromptInput>
         </PromptInputProvider>
         {conversationUsage.hasAny && (
-          <div className="mx-auto mb-3 flex w-full min-w-80 max-w-[82%] flex-wrap items-center justify-end gap-x-3 gap-y-0.5 px-2 text-[11px] text-muted-foreground">
+          <div className="mx-auto mb-1 flex w-full min-w-80 max-w-[82%] flex-wrap items-center justify-end gap-x-3 gap-y-0.5 px-2 text-[11px] text-muted-foreground">
             <span>本次会话Token用量</span>
             <span>输入 {formatTokenCount(conversationUsage.input)}</span>
             <span>输出 {formatTokenCount(conversationUsage.output)}</span>
