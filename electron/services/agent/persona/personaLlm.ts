@@ -20,6 +20,7 @@ const personaCardSchema = z.object({
   punctuationStyle: z.coerce.string().default(''),
   addressing: z.coerce.string().default(''),
   topics: stringArray.default([]),
+  ttsInstructions: z.coerce.string().default(''),
 })
 
 // replies 兼容模型偷懒返回单个字符串的情况
@@ -85,7 +86,8 @@ const CARD_JSON_SHAPE = `{
   "catchphrases": ["口头禅/高频用语，没有就给空数组"],
   "punctuationStyle": "标点与排版习惯，如：几乎不用句号、爱用~和省略号、习惯连发短句",
   "addressing": "对聊天对象（语料中的'我'）的称呼习惯，没有特别称呼就写'无特别称呼'",
-  "topics": ["常聊话题", "..."]
+  "topics": ["常聊话题", "..."],
+  "ttsInstructions": "给语音合成模型的自然语言指令，描述 TA 说语音时的语速、情绪、口语感、停顿和语气；不要包含具体要朗读的文本"
 }`
 
 const FEWSHOT_JSON_SHAPE = `{
@@ -138,6 +140,7 @@ export async function extractPersona(input: PersonaExtractInput, signal?: AbortS
       punctuationStyle: card.punctuationStyle,
       addressing: card.addressing,
       topics: card.topics,
+      ttsInstructions: card.ttsInstructions,
     },
     fewShots: fewShot.examples.filter((e) => e.user && e.replies.length > 0).slice(0, 10),
   }

@@ -545,10 +545,11 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
-  ipcMain.handle('tts:speak', async (_e, text: string) => {
+  ipcMain.handle('tts:speak', async (_e, text: string, options?: { config?: Record<string, unknown> }) => {
     try {
       const { synthesizeSpeech } = await import('../../services/ai/ttsService')
-      return await synthesizeSpeech(String(text || ''))
+      const config = options?.config && typeof options.config === 'object' ? options.config : undefined
+      return await synthesizeSpeech(String(text || ''), config ? { config: config as any, useCache: true } : undefined)
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e), errorCode: 'SYNTHESIS_FAILED' }
     }

@@ -78,7 +78,7 @@ export default function ImageGenTab() {
           <Card.Title>AI 作图</Card.Title>
           <Card.Description>
             启用后，在 AI 助手里说"帮我画一张…"即可调用作图模型生成图片，并直接展示在对话里。
-            图片保存在本地 ai-images 目录。
+            图片保存在缓存目录的 ai-images 文件夹。
           </Card.Description>
         </div>
         <Switch
@@ -159,11 +159,18 @@ export default function ImageGenTab() {
         )}
 
         {previewPath && (
-          <img
-            alt="测试生成的图片"
-            className="max-h-60 rounded-xl border border-border/60"
-            src={`local-image://${encodeURIComponent(previewPath)}`}
-          />
+          <button
+            className="block w-fit cursor-zoom-in border-0 bg-transparent p-0"
+            onClick={() => { void window.electronAPI.window.openImageViewerWindow(previewPath) }}
+            title="点击预览"
+            type="button"
+          >
+            <img
+              alt="测试生成的图片"
+              className="max-h-60 rounded-xl border border-border/60"
+              src={`local-image://${encodeURIComponent(previewPath)}`}
+            />
+          </button>
         )}
       </Card.Content>
       <Card.Footer className="flex flex-wrap gap-2">

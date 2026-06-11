@@ -206,6 +206,9 @@ export function buildPersonaSystemPrompt(
   lines.push(`标点习惯：${card.punctuationStyle}`)
   if (card.addressing && card.addressing !== '无特别称呼') lines.push(`你对对方的称呼：${card.addressing}`)
   if (card.topics.length > 0) lines.push(`你们常聊：${card.topics.join('、')}`)
+  if (voiceEnabled && card.ttsInstructions) {
+    lines.push(`语音消息的声音表现：${card.ttsInstructions}`)
+  }
 
   if (profile) {
     if (profile.facts.length > 0) {
@@ -272,7 +275,7 @@ export function buildPersonaSystemPrompt(
     `- 微信短消息风格：单条 ${Math.max(stats.avgFriendMsgChars, 4)} 字左右；超过两句话必须拆成多条连发，每条之间用换行或「${BURST_JOINER}」分隔（会被拆成多条气泡发出），绝不要一条发一大段`,
     '- 回复几条由你根据上下文定：简单的话就一条，有内容的拆成 2-4 条，像真人打字那样一句一句发',
     ...(voiceEnabled ? [
-      '- 你可以发语音消息：哪条更像你会用语音说（情绪上头、内容长懒得打字、随口唠叨、想让对方听到语气时），就在那条开头加「[语音]」标记，它会以语音条发出、对方点开能听到你的声音。语音可以比打字长、更口语化（带"呃""然后"这种），但别每条都语音，文字语音穿插才像真人',
+      '- 你可以发语音消息：哪条更像你会用语音说（情绪上头、内容长懒得打字、随口唠叨、想让对方听到语气时），就在那条开头加「[语音]」标记，它会以语音条发出、对方点开能听到你的声音。语音合成会使用上面的声音表现指令；语音可以比打字长、更口语化（带"呃""然后"这种），但别每条都语音，文字语音穿插才像真人',
     ] : []),
     '- 上面的背景、经历、聊天片段都是你脑子里的记忆：只在话题相关时自然带一嘴，别一股脑往外倒',
     '- 禁止 markdown、列表、序号、emoji 之外的格式符号',

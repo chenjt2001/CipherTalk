@@ -15,6 +15,11 @@ export interface SpeakResult {
   error?: string
 }
 
+export interface SpeakOptions {
+  awaitEnd?: boolean
+  instructions?: string
+}
+
 let currentAudio: HTMLAudioElement | null = null
 /** 当前播放的清理回调（停止/切换时调用，保证 awaitEnd 的 Promise 不悬挂） */
 let currentOnStop: (() => void) | null = null
@@ -85,7 +90,7 @@ function speakWithSystem(key: string, text: string, seq: number): { started: boo
  * 同 key 再次调用 = 停止（stopped: true）；不同 key = 切换。
  * awaitEnd: true 时等到播放结束才 resolve（连播队列用）。
  */
-export async function speakText(key: string, text: string, options: { awaitEnd?: boolean } = {}): Promise<SpeakResult> {
+export async function speakText(key: string, text: string, options: SpeakOptions = {}): Promise<SpeakResult> {
   const content = String(text || '').trim()
   if (!content) return { ok: false, error: '朗读内容为空' }
 
@@ -101,7 +106,11 @@ export async function speakText(key: string, text: string, options: { awaitEnd?:
 
   let result: { success: boolean; audioBase64?: string; mimeType?: string; error?: string; errorCode?: string } | null = null
   try {
-    result = await window.electronAPI.tts.speak(content)
+    const instructions = String(options.instructions || '').trim()
+    result = await window.electronAPI.tts.speak(
+      content,
+      instructions ? { config: { instructions } } : undefined,
+    )
   } catch (e) {
     result = { success: false, error: e instanceof Error ? e.message : String(e), errorCode: 'SYNTHESIS_FAILED' }
   }
@@ -157,7 +166,7 @@ export async function speakText(key: string, text: string, options: { awaitEnd?:
 /** React hook：订阅当前朗读对象 key，并提供朗读/停止方法。 */
 export function useTtsSpeaker(): {
   speakingKey: string | null
-  speak: (key: string, text: string, options?: { awaitEnd?: boolean }) => Promise<SpeakResult>
+  speak: (key: string, text: string, options?: SpeakOptions) => Promise<SpeakResult>
   stop: () => void
 } {
   const [key, setKey] = useState<string | null>(getSpeakingKey())

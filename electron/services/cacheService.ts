@@ -2,6 +2,7 @@ import { join } from 'path'
 import { existsSync, rmSync, readdirSync, statSync } from 'fs'
 import { app } from 'electron'
 import { ConfigService } from './config'
+import { getUserDataPath } from './runtimePaths'
 import type { AccountProfile } from '../../src/types/account'
 
 /**
@@ -13,7 +14,7 @@ import type { AccountProfile } from '../../src/types/account'
  *
  * 目前真正生效的能力：
  * - 清理图片缓存 / 表情包缓存 / 日志
- * - 清理 AI 功能生成的本地数据库和语音缓存
+ * - 清理 AI 功能生成的本地数据库和生成文件缓存
  * - 读取缓存体积概览（数据库项固定为 0）
  * - 账号配置清理
  */
@@ -399,7 +400,14 @@ export class CacheService {
     ].filter(Boolean)
 
     return Array.from(new Set(
-      basePaths.map(basePath => join(basePath, 'tts-audio'))
+      [
+        ...basePaths.flatMap(basePath => [
+          join(basePath, 'tts-audio'),
+          join(basePath, 'ai-images')
+        ]),
+        // 兼容旧版本：AI 作图曾保存到 userData/ai-images。
+        join(getUserDataPath(), 'ai-images')
+      ]
     ))
   }
 

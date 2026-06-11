@@ -1,7 +1,7 @@
 /**
  * generate_image —— AI 作图工具（见 services/ai/imageGenService）。
  * 仅在用户配置并启用「AI 作图」时才挂进工具集（见 tools/index.ts buildTools / engine.ts）。
- * 生成的图片落盘到 userData/ai-images，前端按 filePath 用 local-image:// 协议直接展示。
+ * 生成的图片落盘到 cachePath/ai-images，前端按 filePath 用 local-image:// 协议直接展示。
  */
 import { tool } from 'ai'
 import { z } from 'zod'

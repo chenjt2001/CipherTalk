@@ -114,6 +114,7 @@ const reviseSchema = z.object({
     punctuationStyle: z.coerce.string().default(''),
     addressing: z.coerce.string().default(''),
     topics: stringArray.default([]),
+    ttsInstructions: z.coerce.string().default(''),
   }),
   profile: profileSchema,
   newFewShots: z.array(fewShotItemSchema).catch([]),
@@ -128,9 +129,10 @@ export async function revisePersona(input: PersonaReviseInput, signal?: AbortSig
       system:
         `你负责更新「${input.friendName}」的人物画像。给你 TA 的旧画像（说话风格卡 + 深层画像）和这之后新增的真实聊天记录。` +
         '请输出修订后的完整画像：风格没变就保留原描述，变了就更新；新事实/新近况/新梗补进深层画像，过时的（如已结束的状态）修正；' +
+        'card.ttsInstructions 是给语音合成模型的自然语言指令，用来描述 TA 说语音时的语速、情绪、口语感、停顿和语气，不要包含具体要朗读的文本；' +
         '再从新聊天里挑 0-3 组最能体现 TA 说话风格的真实问答对（必须原样摘抄，没有就给空数组）。' +
         '\n只输出一个 JSON 对象，不要任何解释或代码围栏，格式：' +
-        '\n{ "card": {tone, personalityTraits, catchphrases, punctuationStyle, addressing, topics}, ' +
+        '\n{ "card": {tone, personalityTraits, catchphrases, punctuationStyle, addressing, topics, ttsInstructions}, ' +
         `"profile": ${PROFILE_JSON_SHAPE}, ` +
         '"newFewShots": [{ "user": "我说的", "replies": ["TA 回的，连发逐条"] }] }',
       prompt: [

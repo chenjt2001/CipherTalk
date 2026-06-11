@@ -35,6 +35,7 @@ export interface TtsConfig {
   baseURL: string
   model: string
   voice: string
+  instructions: string
   speed: number
 }
 
@@ -45,6 +46,10 @@ export interface TtsSpeakResult {
   cached?: boolean
   error?: string
   errorCode?: 'NOT_CONFIGURED' | 'SYNTHESIS_FAILED'
+}
+
+export interface TtsSpeakOptions {
+  config?: Partial<TtsConfig>
 }
 
 export interface ImageGenConfig {
@@ -184,6 +189,7 @@ export interface PersonaCardInfo {
   punctuationStyle: string
   addressing: string
   topics: string[]
+  ttsInstructions: string
 }
 
 export interface PersonaProfileInfo {
@@ -1167,7 +1173,7 @@ export interface ElectronAPI {
     getConfig: () => Promise<{ success: boolean; config?: TtsConfig; available?: boolean; error?: string }>
     setConfig: (patch: Partial<TtsConfig>) => Promise<{ success: boolean; config?: TtsConfig; error?: string }>
     test: (cfg: Partial<TtsConfig>) => Promise<TtsSpeakResult>
-    speak: (text: string) => Promise<TtsSpeakResult>
+    speak: (text: string, options?: TtsSpeakOptions) => Promise<TtsSpeakResult>
   }
   imageGen: {
     getConfig: () => Promise<{ success: boolean; config?: ImageGenConfig; available?: boolean; error?: string }>

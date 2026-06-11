@@ -155,6 +155,7 @@ interface ConfigSchema {
     baseURL: string
     model: string
     voice: string
+    instructions: string
     speed: number
   }
   // AI 作图 —— AI 助手 generate_image 工具用，独立于聊天模型
@@ -267,6 +268,7 @@ const defaults: ConfigSchema = {
     baseURL: 'https://api.siliconflow.cn/v1',
     model: 'FunAudioLLM/CosyVoice2-0.5B',
     voice: 'FunAudioLLM/CosyVoice2-0.5B:anna',
+    instructions: '',
     speed: 1,
   },
   imageGenConfig: {

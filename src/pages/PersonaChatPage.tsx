@@ -151,7 +151,10 @@ export default function PersonaChatPage() {
       const key = `${messageId}:${i}`
       if (i > startIndex && playedVoice.has(key)) continue
       markVoicePlayed(key)
-      const res = await speakVoice(key, bubble.text, { awaitEnd: true })
+      const res = await speakVoice(key, bubble.text, {
+        awaitEnd: true,
+        instructions: persona?.card.ttsInstructions,
+      })
       if (voiceChainRef.current !== chain || res.stopped) return
       if (!res.ok) {
         // 念不出来就把文字亮出来兜底
@@ -437,7 +440,7 @@ export default function PersonaChatPage() {
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8">
         {/* 呼吸光环：AI 单次调用期间百分比不动，靠动画表明没卡死 */}
         <div className="relative flex size-20 items-center justify-center">
-          <span className="absolute inset-0 animate-ping rounded-full bg-accent/20 [animation-duration:2.4s]" />
+          <span className="absolute inset-0 animate-ping rounded-full bg-accent/20 animation-duration-[2.4s]" />
           <span className="absolute inset-1 animate-pulse rounded-full bg-accent/15" />
           <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={64} />
         </div>
@@ -630,7 +633,7 @@ export default function PersonaChatPage() {
         onOpenChange={(open) => { if (!open) setConfirmAction(null) }}
       >
         <AlertDialog.Container>
-          <AlertDialog.Dialog className="sm:max-w-[400px]">
+          <AlertDialog.Dialog className="sm:max-w-100">
             <AlertDialog.CloseTrigger />
             <AlertDialog.Header>
               <AlertDialog.Icon status="danger" />
@@ -655,7 +658,7 @@ export default function PersonaChatPage() {
         onOpenChange={(open) => { if (!open) setConfirmAction(null) }}
       >
         <AlertDialog.Container>
-          <AlertDialog.Dialog className="sm:max-w-[400px]">
+          <AlertDialog.Dialog className="sm:max-w-100">
             <AlertDialog.CloseTrigger />
             <AlertDialog.Header>
               <AlertDialog.Icon status="danger" />

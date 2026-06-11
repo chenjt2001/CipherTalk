@@ -4,7 +4,7 @@
  * 自带 IPC（tts:getConfig/setConfig/test），未配置时各处朗读回退系统语音。
  */
 import { useEffect, useRef, useState } from 'react'
-import { Button, Card, Description, InputGroup, Label, ListBox, Select, Switch, TextField } from '@heroui/react'
+import { Button, Card, Description, InputGroup, Label, ListBox, Select, Switch, TextArea, TextField } from '@heroui/react'
 import { AlertCircle, CheckCircle, Volume2 } from 'lucide-react'
 import type { TtsConfig } from '@/types/electron'
 
@@ -15,6 +15,7 @@ const DEFAULT_CFG: TtsConfig = {
   baseURL: 'https://api.siliconflow.cn/v1',
   model: 'FunAudioLLM/CosyVoice2-0.5B',
   voice: 'FunAudioLLM/CosyVoice2-0.5B:anna',
+  instructions: '',
   speed: 1,
 }
 
@@ -153,6 +154,17 @@ export default function TtsTab() {
             <InputGroup.Input placeholder="FunAudioLLM/CosyVoice2-0.5B:anna" />
           </InputGroup>
           <Description>硅基流动格式为 模型:音色名（alex/anna/bella…）；OpenAI 为 alloy/nova 等。</Description>
+        </TextField>
+
+        <TextField fullWidth onChange={(v) => patch({ instructions: v })} value={cfg.instructions || ''}>
+          <Label>语气/风格指令</Label>
+          <TextArea
+            maxLength={1000}
+            placeholder="温柔、轻声、像微信语音一样自然，带一点笑意"
+            rows={3}
+            variant="secondary"
+          />
+          <Description>支持该能力的语音模型会按这里的自然语言控制朗读；克隆好友语音会优先使用画像自动生成的指令。</Description>
         </TextField>
 
         <TextField

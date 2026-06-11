@@ -10,7 +10,6 @@ import { generateImage } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { ConfigService } from '../config'
-import { getUserDataPath } from '../runtimePaths'
 import { createProxyFetch, getResolvedProxyUrl } from './proxyFetch'
 
 export interface ImageGenConfig {
@@ -61,9 +60,14 @@ export function isImageGenAvailable(cfg: ImageGenConfig = getImageGenConfig()): 
 }
 
 function imageOutputDir(): string {
-  const dir = path.join(getUserDataPath(), 'ai-images')
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-  return dir
+  const cs = new ConfigService()
+  try {
+    const dir = path.join(cs.getCacheBasePath(), 'ai-images')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    return dir
+  } finally {
+    cs.close()
+  }
 }
 
 function extensionOf(mimeType: string): string {

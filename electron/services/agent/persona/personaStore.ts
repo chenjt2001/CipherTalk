@@ -53,13 +53,23 @@ function safeParse<T>(json: string | null): T | null {
   try { return JSON.parse(json) as T } catch { return null }
 }
 
+function normalizeCard(card: PersonaCard): PersonaCard {
+  return {
+    ...card,
+    personalityTraits: Array.isArray(card.personalityTraits) ? card.personalityTraits : [],
+    catchphrases: Array.isArray(card.catchphrases) ? card.catchphrases : [],
+    topics: Array.isArray(card.topics) ? card.topics : [],
+    ttsInstructions: String(card.ttsInstructions || ''),
+  }
+}
+
 function rowToRecord(row: PersonaRow): PersonaRecord {
   return {
     id: row.id,
     accountId: row.account_id,
     sessionId: row.session_id,
     displayName: row.display_name,
-    card: JSON.parse(row.card_json) as PersonaCard,
+    card: normalizeCard(JSON.parse(row.card_json) as PersonaCard),
     fewShots: JSON.parse(row.few_shots_json) as PersonaFewShot[],
     stats: JSON.parse(row.stats_json) as PersonaStats,
     profile: safeParse<PersonaProfile>(row.profile_json),

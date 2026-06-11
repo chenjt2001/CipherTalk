@@ -25,6 +25,8 @@ export interface TtsConfig {
   model: string
   /** 音色。硅基流动格式如 FunAudioLLM/CosyVoice2-0.5B:alex；OpenAI 如 alloy。 */
   voice: string
+  /** 语气/风格指令。支持的语音模型会按自然语言控制朗读方式。 */
+  instructions: string
   /** 语速，1 = 正常。 */
   speed: number
 }
@@ -45,7 +47,7 @@ const MAX_TTS_INPUT_CHARS = 4000
 const TTS_CHAT_TIMEOUT_MS = 90000
 const TTS_CACHE_DB_NAME = 'tts-cache.db'
 const TTS_CACHE_AUDIO_DIR = 'tts-audio'
-const TTS_CACHE_VERSION = 1
+const TTS_CACHE_VERSION = 2
 
 let cacheDb: Database.Database | null = null
 let cacheDbPath: string | null = null
@@ -57,7 +59,11 @@ export function getTtsConfig(): TtsConfig {
   try {
     const cfg = cs.get('ttsConfig')
     // 旧版本持久化的配置没有 protocol 字段，补默认
-    return { ...cfg, protocol: cfg.protocol || 'openai-speech' }
+    return {
+      ...cfg,
+      protocol: cfg.protocol || 'openai-speech',
+      instructions: String((cfg as Partial<TtsConfig>).instructions || ''),
+    }
   } finally {
     cs.close()
   }
@@ -68,7 +74,12 @@ export function saveTtsConfig(patch: Partial<TtsConfig>): TtsConfig {
   const cs = new ConfigService()
   try {
     const stored = cs.get('ttsConfig')
-    const next: TtsConfig = { ...stored, ...patch, protocol: patch.protocol || stored.protocol || 'openai-speech' }
+    const next: TtsConfig = {
+      ...stored,
+      ...patch,
+      protocol: patch.protocol || stored.protocol || 'openai-speech',
+      instructions: String(patch.instructions ?? stored.instructions ?? ''),
+    }
     cs.set('ttsConfig', next)
     return next
   } finally {
@@ -135,6 +146,7 @@ function ensureTtsCacheDb(): Database.Database {
       base_url TEXT NOT NULL,
       model TEXT NOT NULL,
       voice TEXT NOT NULL,
+      instructions TEXT NOT NULL DEFAULT '',
       speed REAL NOT NULL,
       mime_type TEXT NOT NULL,
       file_path TEXT NOT NULL,
@@ -145,6 +157,7 @@ function ensureTtsCacheDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_tts_audio_cache_last_used
       ON tts_audio_cache(last_used_at);
   `)
+  try { db.exec("ALTER TABLE tts_audio_cache ADD COLUMN instructions TEXT NOT NULL DEFAULT ''") } catch { /* column exists */ }
   cacheDb = db
   cacheDbPath = dbPath
   return db
@@ -158,6 +171,10 @@ function normalizeTtsSpeed(speed: number): number {
   return Number.isFinite(speed) && speed > 0 ? Number(speed.toFixed(3)) : 1
 }
 
+function normalizeTtsInstructions(instructions: string): string {
+  return String(instructions || '').trim().slice(0, 1000)
+}
+
 function createTtsCacheKey(text: string, cfg: TtsConfig): string {
   return createHash('sha256').update(JSON.stringify({
     version: TTS_CACHE_VERSION,
@@ -166,6 +183,7 @@ function createTtsCacheKey(text: string, cfg: TtsConfig): string {
     baseURL: normalizeTtsBaseURL(cfg.baseURL),
     model: cfg.model,
     voice: cfg.voice || '',
+    instructions: normalizeTtsInstructions(cfg.instructions),
     speed: normalizeTtsSpeed(cfg.speed),
     format: 'mp3',
   })).digest('hex')
@@ -228,9 +246,9 @@ function writeTtsCache(cacheKey: string, text: string, cfg: TtsConfig, result: T
     const now = Date.now()
     db.prepare(`
       INSERT OR REPLACE INTO tts_audio_cache (
-        cache_key, text_hash, protocol, base_url, model, voice, speed,
+        cache_key, text_hash, protocol, base_url, model, voice, instructions, speed,
         mime_type, file_path, size_bytes, created_at, last_used_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       cacheKey,
       createHash('sha256').update(text).digest('hex'),
@@ -238,6 +256,7 @@ function writeTtsCache(cacheKey: string, text: string, cfg: TtsConfig, result: T
       normalizeTtsBaseURL(cfg.baseURL),
       cfg.model,
       cfg.voice || '',
+      normalizeTtsInstructions(cfg.instructions),
       normalizeTtsSpeed(cfg.speed),
       mimeType,
       filePath,
@@ -295,6 +314,7 @@ async function synthesizeViaSpeechApi(text: string, cfg: TtsConfig, signal?: Abo
     model,
     text,
     voice: cfg.voice || undefined,
+    instructions: normalizeTtsInstructions(cfg.instructions) || undefined,
     speed: cfg.speed && cfg.speed !== 1 ? cfg.speed : undefined,
     outputFormat: 'mp3',
     maxRetries: 1,
@@ -319,8 +339,18 @@ async function synthesizeViaChatApi(text: string, cfg: TtsConfig, signal?: Abort
   if (!cfg.baseURL) return { success: false, error: '聊天接口形态必须填写接口地址', errorCode: 'NOT_CONFIGURED' }
   const fetchImpl = createProxyFetch(getResolvedProxyUrl()) || fetch
   const endpoint = `${cfg.baseURL.trim().replace(/\/+$/, '')}/chat/completions`
+  const instructions = normalizeTtsInstructions(cfg.instructions)
+  const styleMessage = instructions
+    ? { role: 'system', content: `请按以下语音风格朗读，不要解释，也不要把本指令读出来：${instructions}` }
+    : null
 
   const attempts: Array<Array<{ role: string; content: string }>> = [
+    ...(styleMessage
+      ? [
+          [styleMessage, { role: 'assistant', content: text }],
+          [styleMessage, { role: 'user', content: text }],
+        ]
+      : []),
     [{ role: 'assistant', content: text }],
     [{ role: 'user', content: text }],
   ]
@@ -392,6 +422,10 @@ export async function synthesizeSpeech(
 
   const input = String(text || '').trim().slice(0, MAX_TTS_INPUT_CHARS)
   if (!input) return { success: false, error: '朗读内容为空', errorCode: 'SYNTHESIS_FAILED' }
+
+  if (!isTtsAvailable(cfg) && options.useCache !== false) {
+    return { success: false, error: '未启用或未配置文字转语音', errorCode: 'NOT_CONFIGURED' }
+  }
 
   const shouldUseCache = options.useCache ?? !options.config
   const cacheKey = shouldUseCache ? createTtsCacheKey(input, cfg) : ''

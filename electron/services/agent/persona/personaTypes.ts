@@ -18,6 +18,8 @@ export interface PersonaCard {
   addressing: string
   /** 常聊话题 */
   topics: string[]
+  /** 语音合成风格指令：播放克隆好友语音气泡时传给 TTS 模型。 */
+  ttsInstructions: string
 }
 
 /** 黄金样本：从真实聊天里摘的问答对，replies 保留连发的逐条形态。 */

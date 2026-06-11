@@ -2625,7 +2625,7 @@ export default function AgentPage() {
                           </MessageAttachments>
                         )
                       }
-                      // generate_image 工具的产出图：直接展示在消息流里，点击在文件夹中打开
+                      // generate_image 工具的产出图：直接展示在消息流里，点击打开灯箱预览
                       if (part.type === 'tool-generate_image' && part.state === 'output-available') {
                         const filePath = String((part.output as { filePath?: unknown } | undefined)?.filePath || '')
                         if (!filePath) return null
@@ -2633,8 +2633,8 @@ export default function AgentPage() {
                           <button
                             className="mt-1 block w-fit cursor-zoom-in border-0 bg-transparent p-0 text-left"
                             key={`genimg-${index}`}
-                            onClick={() => { void window.electronAPI.shell.showItemInFolder(filePath) }}
-                            title="点击在文件夹中查看"
+                            onClick={() => { void window.electronAPI.window.openImageViewerWindow(filePath) }}
+                            title="点击预览"
                             type="button"
                           >
                             <img
