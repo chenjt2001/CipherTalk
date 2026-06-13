@@ -47,7 +47,6 @@ function ExportPage() {
         <ExportProgressModal
           progress={shared.exportProgress}
           options={activeTab === 'chat' ? chat.options : undefined}
-          unitLabel={unitLabel}
           currentLabel={currentLabel}
         />
       )}

@@ -52,6 +52,7 @@ export function useDatabaseExport(shared: ExportShared, active: boolean) {
     if (!shared.exportFolder || selected.size === 0) return
 
     shared.setIsExporting(true)
+    shared.setExportProgress({ current: 0, total: selected.size, currentName: '', phase: '准备导出', detail: '' })
     shared.setExportResult(null)
     try {
       const result = await window.electronAPI.export.exportDatabases(

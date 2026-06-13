@@ -11,6 +11,7 @@ import { videoService } from './videoService'
 import { dbAdapter } from './dbAdapter'
 import { findMessageDbPaths, findDbByName, getDbStoragePath } from './dbStoragePaths'
 import { snsService, isVideoUrl, type SnsPost, type SnsShareInfo } from './snsService'
+import { parseQuoteMessage } from './chat/contentParsers'
 
 // ChatLab 0.0.2 格式类型定义
 export interface ChatLabHeader {
@@ -2059,6 +2060,15 @@ class ExportService {
               }
             }
 
+            // 引用消息：解析被引用的原消息（发送者 + 内容）
+            let quote: { sender?: string; content: string } | undefined
+            if (content && content.includes('<refermsg>')) {
+              const q = parseQuoteMessage(content)
+              if (q.content) {
+                quote = { sender: q.sender, content: q.content }
+              }
+            }
+
             allMessages.push({
               timestamp: createTime,
               sender: actualSender,
@@ -2067,6 +2077,7 @@ class ExportService {
               content: parsedContent,
               rawContent: content,
               isSend,
+              quote,
               chatRecords: chatRecordList ? this.formatChatRecordsForJson(chatRecordList, options) : undefined
             })
 
@@ -2486,7 +2497,7 @@ class ExportService {
         const sessionInfo = await this.getContactInfo(sessionId)
 
         onProgress?.({
-          current: i + 1,
+          current: i,
           total: sessionIds.length,
           currentSession: sessionInfo.displayName,
           phase: 'exporting',
@@ -2517,7 +2528,7 @@ class ExportService {
           try {
             const mediaResult = await this.exportMediaFiles(sessionId, safeName, sessionOutputDir, options, (detail) => {
               onProgress?.({
-                current: i + 1,
+                current: i,
                 total: sessionIds.length,
                 currentSession: sessionInfo.displayName,
                 phase: 'writing',
@@ -2559,6 +2570,14 @@ class ExportService {
           failCount++
           console.error(`导出 ${sessionId} 失败:`, result.error)
         }
+
+        onProgress?.({
+          current: i + 1,
+          total: sessionIds.length,
+          currentSession: sessionInfo.displayName,
+          phase: 'exporting',
+          detail: result.success ? '已完成当前会话' : `当前会话导出失败: ${result.error || '未知错误'}`
+        })
 
         // 让出事件循环，避免阻塞主进程
         await new Promise(resolve => setImmediate(resolve))

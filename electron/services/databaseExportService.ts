@@ -181,12 +181,20 @@ class DatabaseExportService {
           })
           tableErrors.push(...errs)
           successCount++
+          onProgress?.({ current: i + 1, total, currentSession: dbName, detail: '已完成当前数据库', phase: 'exporting' })
         } catch (e) {
           failCount++
           tableErrors.push({
             db: dbName,
             table: '(整库)',
             error: e instanceof Error ? e.message : String(e)
+          })
+          onProgress?.({
+            current: i + 1,
+            total,
+            currentSession: dbName,
+            detail: `当前数据库导出失败: ${e instanceof Error ? e.message : String(e)}`,
+            phase: 'exporting'
           })
         }
       }

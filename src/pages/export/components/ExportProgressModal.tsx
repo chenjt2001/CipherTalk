@@ -6,8 +6,6 @@ interface ExportProgressModalProps {
   progress: ExportProgress
   /** 聊天导出才有的格式/媒体选项；其它导出（如数据库）不传 */
   options?: ExportOptions
-  /** 进度单位，例如「个会话」「个数据库」 */
-  unitLabel?: string
   /** 当前项的前缀标签，例如「当前会话」「当前数据库」 */
   currentLabel?: string
 }
@@ -15,9 +13,12 @@ interface ExportProgressModalProps {
 export default function ExportProgressModal({
   progress,
   options,
-  unitLabel = '个会话',
   currentLabel = '当前会话'
 }: ExportProgressModalProps) {
+  const progressPercent = progress.total > 0
+    ? Math.min(100, Math.max(0, Math.round((progress.current / progress.total) * 100)))
+    : 0
+
   const optionChips = options
     ? ([
         options.exportImages && '含图片',
@@ -61,14 +62,17 @@ export default function ExportProgressModal({
               {progress.total > 0 && (
                 <ProgressBar
                   aria-label="导出进度"
-                  value={progress.current}
-                  maxValue={Math.max(1, progress.total)}
+                  value={progressPercent}
+                  maxValue={100}
                   className="mt-1"
                 >
-                  <Label>{progress.current} / {progress.total} {unitLabel}</Label>
+                  <Label>{progressPercent}%</Label>
                   <ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track>
                 </ProgressBar>
               )}
+              <Typography type="body-xs" color="muted">
+                导出过程中可能会出现卡顿，请耐心等待！
+              </Typography>
             </div>
           </Modal.Body>
         </Modal.Dialog>

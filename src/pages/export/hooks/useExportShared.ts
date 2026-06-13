@@ -35,7 +35,7 @@ export function useExportShared(): ExportShared {
       // 将 phase 英文映射为中文描述
       const phaseMap: Record<string, string> = {
         'preparing': '正在准备...',
-        'exporting': '正在导出消息...',
+        'exporting': '正在导出...',
         'writing': '正在写入文件...',
         'complete': '导出完成'
       }
