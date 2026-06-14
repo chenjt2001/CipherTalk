@@ -1167,6 +1167,21 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
+  ipcMain.handle('persona:exportVoiceSample', async (_event, payload: { sessionId: string; displayName?: string; outputPath: string }) => {
+    try {
+      const { exportPersonaVoiceSampleFromSession } = await import('../../services/agent/persona/personaVoiceCloneService')
+      return await exportPersonaVoiceSampleFromSession({
+        sessionId: String(payload?.sessionId || '').trim(),
+        displayName: String(payload?.displayName || '').trim(),
+        outputPath: String(payload?.outputPath || '').trim(),
+        minSeconds: 10,
+        logger: ctx.getLogService(),
+      })
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   ipcMain.handle('persona:delete', async (_event, sessionId: string) => {
     try {
       const id = String(sessionId || '').trim()

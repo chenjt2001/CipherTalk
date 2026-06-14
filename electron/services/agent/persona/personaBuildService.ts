@@ -23,6 +23,59 @@ function errorToLogData(error: unknown): Record<string, unknown> {
   return { message: String(error) }
 }
 
+// 超大会话的语音补转上限：防止克隆卡在转写上太久（超出的语音可后续在聊天界面手动转写）
+const MAX_VOICE_TRANSCRIBE = 400
+
+/**
+ * 克隆前把会话里「还没转写过」的语音批量补转并写入转写缓存，
+ * 让后续 buildPersonaCorpus 能把语音内容纳入文风/few-shot 语料（否则未转写语音会被直接丢弃）。
+ * STT 未就绪（模型没下/在线转写没配）时整体跳过、不阻断克隆；单条失败静默继续。
+ */
+async function pretranscribeSessionVoices(
+  sessionId: string,
+  messages: { localId: number; localType: number; createTime: number }[],
+  sendProgress: (stage: PersonaBuildProgress['stage'], title: string, percent: number, detail?: string) => void,
+  logger: PersonaBuildLogger | null,
+): Promise<void> {
+  const { sttRuntimeService } = await import('../../sttRuntimeService')
+  const { chatService } = await import('../../chatService')
+  const pending = messages.filter(
+    (m) => m.localType === 34 && !sttRuntimeService.getCachedTranscript(sessionId, m.createTime),
+  )
+  if (pending.length === 0) return
+
+  const total = Math.min(pending.length, MAX_VOICE_TRANSCRIBE)
+  if (pending.length > total) {
+    logger?.warn?.('Persona', '未转写语音过多，仅补转前一部分', { sessionId, pending: pending.length, limit: total })
+  }
+
+  let processed = 0
+  let transcribed = 0
+  for (let i = 0; i < total; i += 1) {
+    const m = pending[i]
+    try {
+      const voice = await chatService.getVoiceData(sessionId, String(m.localId), m.createTime)
+      if (voice.success && voice.data) {
+        const result = await sttRuntimeService.transcribeWavBuffer(Buffer.from(voice.data, 'base64'), {
+          cache: { sessionId, createTime: m.createTime },
+        })
+        if (result.errorCode === 'STT_NOT_READY') {
+          logger?.warn?.('Persona', '语音转写未就绪，跳过补转（不影响克隆）', { sessionId, error: result.error })
+          return
+        }
+        if (result.success && result.transcript) transcribed += 1
+      }
+    } catch {
+      // 单条语音补转失败静默跳过，继续下一条
+    }
+    processed += 1
+    if (processed % 5 === 0 || processed === total) {
+      sendProgress('indexing', '正在转写语音补全语料', 12 + Math.round((processed / total) * 24), `已处理 ${processed}/${total} 条语音`)
+    }
+  }
+  logger?.warn?.('Persona', '语音补转完成', { sessionId, transcribed, processed })
+}
+
 export async function buildPersonaFromSession(input: PersonaBuildInput): Promise<PersonaBuildResult> {
   const sessionId = String(input.sessionId || '').trim()
   const displayName = String(input.displayName || '').trim() || sessionId
@@ -50,6 +103,9 @@ export async function buildPersonaFromSession(input: PersonaBuildInput): Promise
     const messages = await chatSearchIndexService.listSessionMemoryMessages(sessionId, (p) => {
       sendProgress('indexing', '正在读取聊天记录', 10, p.message)
     }, 6000)
+
+    sendProgress('indexing', '正在转写语音补全语料', 12)
+    await pretranscribeSessionVoices(sessionId, messages, sendProgress, logger)
 
     sendProgress('corpus', '正在分析说话风格', 40)
     const { buildPersonaCorpus, MIN_FRIEND_MESSAGES, PROFILE_MAX_CHUNKS, mergeTurns, renderProfileChunks, extractPersonaPairs } =

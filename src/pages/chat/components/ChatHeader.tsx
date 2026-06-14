@@ -1,4 +1,4 @@
-import { Aperture, Bell, BellOff, Bot, Image as ImageIcon, Info, Loader2, Mic, RefreshCw, Sparkles } from 'lucide-react'
+import { Aperture, Bell, BellOff, Bot, Download, Image as ImageIcon, Info, Loader2, Mic, RefreshCw, Sparkles } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Drawer, Tooltip } from '@heroui/react'
 import { DateJumpPicker } from './DateJumpPicker'
@@ -96,6 +96,8 @@ interface ChatHeaderProps {
   isBatchTranscribing: boolean
   batchTranscribeProgress: Progress
   onBatchTranscribe: () => void | Promise<void>
+  isExportingVoiceSample: boolean
+  onExportVoiceCloneSample: () => void | Promise<void>
   isBatchDecrypting: boolean
   batchDecryptProgress: Progress
   onBatchDecrypt: () => void | Promise<void>
@@ -115,6 +117,8 @@ export function ChatHeader({
   isBatchTranscribing,
   batchTranscribeProgress,
   onBatchTranscribe,
+  isExportingVoiceSample,
+  onExportVoiceCloneSample,
   isBatchDecrypting,
   batchDecryptProgress,
   onBatchDecrypt
@@ -489,6 +493,24 @@ export function ChatHeader({
               </Button>
             </Tooltip.Trigger>
             <Tooltip.Content>克隆好友（和 TA 的数字分身聊天）</Tooltip.Content>
+          </Tooltip>
+        )}
+
+        {isPrivateSession && (
+          <Tooltip delay={0}>
+            <Tooltip.Trigger>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label="导出复刻语音样本"
+                onPress={onExportVoiceCloneSample}
+                isDisabled={isExportingVoiceSample || !currentSessionId}
+              >
+                {isExportingVoiceSample ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+              </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content>{isExportingVoiceSample ? '正在导出复刻语音样本' : '导出复刻语音样本（至少 10 秒）'}</Tooltip.Content>
           </Tooltip>
         )}
 

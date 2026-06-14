@@ -4,7 +4,7 @@
  */
 import { createHash, randomUUID } from 'crypto'
 import { mkdirSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { chatService } from '../../chatService'
 import { createProxyFetch, getResolvedProxyUrl } from '../../ai/proxyFetch'
 import { getTtsConfig, type TtsConfig } from '../../ai/ttsService'
@@ -27,6 +27,18 @@ export interface PersonaVoiceCloneInput {
 
 export type PersonaVoiceCloneResult =
   | { success: true; persona: PersonaRecord; voice: PersonaTtsVoiceBinding }
+  | { success: false; error: string }
+
+export interface PersonaVoiceSampleExportInput {
+  sessionId: string
+  displayName?: string
+  outputPath: string
+  minSeconds?: number
+  logger?: PersonaVoiceCloneLogger | null
+}
+
+export type PersonaVoiceSampleExportResult =
+  | { success: true; outputPath: string; sampleCount: number; sampleSeconds: number; audioBytes: number }
   | { success: false; error: string }
 
 interface ParsedWav {
@@ -206,7 +218,12 @@ function isSameWavFormat(a: ParsedWav, b: ParsedWav): boolean {
   return a.sampleRate === b.sampleRate && a.channels === b.channels && a.bitsPerSample === b.bitsPerSample
 }
 
-async function collectVoiceSample(sessionId: string): Promise<VoiceSample> {
+async function collectVoiceSample(sessionId: string, options: { minSeconds?: number; actionLabel?: string } = {}): Promise<VoiceSample> {
+  const requestedMinSeconds = Number(options.minSeconds)
+  const minSeconds = Number.isFinite(requestedMinSeconds) && requestedMinSeconds > 0
+    ? requestedMinSeconds
+    : VOICE_CLONE_MIN_SECONDS
+  const actionLabel = String(options.actionLabel || '复刻').trim() || '复刻'
   const result = await chatService.getAllVoiceMessages(sessionId)
   if (!result.success || !Array.isArray(result.messages)) {
     throw new Error(result.error || '读取好友语音消息失败')
@@ -247,8 +264,8 @@ async function collectVoiceSample(sessionId: string): Promise<VoiceSample> {
   if (!base || samples.length === 0) {
     throw new Error('没有可用的 PCM WAV 语音样本')
   }
-  if (totalSeconds < VOICE_CLONE_MIN_SECONDS) {
-    throw new Error(`可用语音样本约 ${Math.round(totalSeconds)} 秒，建议至少 ${VOICE_CLONE_MIN_SECONDS} 秒后再复刻`)
+  if (totalSeconds < minSeconds) {
+    throw new Error(`可用语音样本约 ${Math.round(totalSeconds)} 秒，建议至少 ${minSeconds} 秒后再${actionLabel}`)
   }
 
   const silence = Buffer.alloc(Math.round(base.sampleRate * base.channels * (base.bitsPerSample / 8) * 0.18))
@@ -479,6 +496,46 @@ async function cloneVolcengineVoice(
   }
 
   throw new Error(lastStatus.message || '豆包声音复刻超时，请稍后重试或到官方控制台查看状态')
+}
+
+export async function exportPersonaVoiceSampleFromSession(input: PersonaVoiceSampleExportInput): Promise<PersonaVoiceSampleExportResult> {
+  const sessionId = String(input.sessionId || '').trim()
+  const outputPath = String(input.outputPath || '').trim()
+  const logger = input.logger || null
+  const requestedMinSeconds = Number(input.minSeconds)
+  const minSeconds = Math.max(10, Number.isFinite(requestedMinSeconds) && requestedMinSeconds > 0 ? requestedMinSeconds : 10)
+  try {
+    if (!sessionId) return { success: false, error: '缺少 sessionId' }
+    if (!outputPath) return { success: false, error: '缺少导出路径' }
+
+    const displayName = String(input.displayName || sessionId).trim()
+    logInfo(logger, '开始导出声音复刻样本', { sessionId, displayName, outputPath, minSeconds })
+
+    const sample = await collectVoiceSample(sessionId, { minSeconds, actionLabel: '导出' })
+    const audio = Buffer.from(sample.audioBase64, 'base64')
+    mkdirSync(dirname(outputPath), { recursive: true })
+    writeFileSync(outputPath, audio)
+
+    logInfo(logger, '声音复刻样本导出完成', {
+      sessionId,
+      displayName,
+      outputPath,
+      sampleCount: sample.sampleCount,
+      sampleSeconds: sample.sampleSeconds,
+      audioBytes: audio.length,
+    })
+    return {
+      success: true,
+      outputPath,
+      sampleCount: sample.sampleCount,
+      sampleSeconds: sample.sampleSeconds,
+      audioBytes: audio.length,
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    logger?.error?.('PersonaVoice', '声音复刻样本导出失败', { sessionId, outputPath, error: message })
+    return { success: false, error: message }
+  }
 }
 
 export async function clonePersonaVoiceFromSession(input: PersonaVoiceCloneInput): Promise<PersonaVoiceCloneResult> {

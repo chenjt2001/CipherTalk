@@ -1223,6 +1223,7 @@ export interface ElectronAPI {
     list: () => Promise<{ success: boolean; personas?: PersonaRecordInfo[]; error?: string }>
     build: (payload: { sessionId: string; displayName?: string }) => Promise<{ success: boolean; persona?: PersonaRecordInfo; error?: string }>
     cloneVoice: (payload: { sessionId: string; displayName?: string }) => Promise<{ success: boolean; persona?: PersonaRecordInfo; voice?: PersonaTtsVoiceBindingInfo; error?: string }>
+    exportVoiceSample: (payload: { sessionId: string; displayName?: string; outputPath: string }) => Promise<{ success: boolean; outputPath?: string; sampleCount?: number; sampleSeconds?: number; audioBytes?: number; error?: string }>
     delete: (sessionId: string) => Promise<{ success: boolean; error?: string }>
     refreshIfStale: (sessionId: string) => Promise<{ success: boolean; refreshed?: boolean; persona?: PersonaRecordInfo | null; error?: string }>
     reflect: (payload: { sessionId: string; conversationId: number }) => Promise<{ success: boolean; reflected?: boolean; error?: string }>

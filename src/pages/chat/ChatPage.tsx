@@ -157,6 +157,7 @@ function ChatPage(_props: ChatPageProps) {
   
   // 批量语音转文字相关状态
   const [isBatchTranscribing, setIsBatchTranscribing] = useState(false)
+  const [isExportingVoiceSample, setIsExportingVoiceSample] = useState(false)
   const [batchTranscribeProgress, setBatchTranscribeProgress] = useState({ current: 0, total: 0 })
   const [showBatchConfirm, setShowBatchConfirm] = useState(false)
   const [batchVoiceCount, setBatchVoiceCount] = useState(0) // 保存查询到的语音消息数量
@@ -271,6 +272,56 @@ function ChatPage(_props: ChatPageProps) {
       showTopToast(`导出语音文件失败: ${String(e)}`, false)
     }
   }, [showTopToast])
+
+  const exportVoiceCloneSample = useCallback(async () => {
+    if (!currentSessionId || isExportingVoiceSample) return
+
+    const session = sessions.find(s => s.username === currentSessionId)
+    if (!session) {
+      showTopToast('当前会话不存在', false)
+      return
+    }
+
+    setIsExportingVoiceSample(true)
+    try {
+      const downloadsPath = await window.electronAPI.app.getDownloadsPath()
+      const safeSessionName = String(session.displayName || session.username || 'voice_clone_sample')
+        .replace(/[<>:"/\\|?*]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim() || 'voice_clone_sample'
+      const timestamp = new Date()
+      const pad = (value: number) => String(value).padStart(2, '0')
+      const fileName = `${safeSessionName}_复刻语音样本_${timestamp.getFullYear()}${pad(timestamp.getMonth() + 1)}${pad(timestamp.getDate())}_${pad(timestamp.getHours())}${pad(timestamp.getMinutes())}${pad(timestamp.getSeconds())}.wav`
+
+      const saveResult = await window.electronAPI.dialog.saveFile({
+        title: '导出复刻语音样本',
+        defaultPath: `${downloadsPath}\\${fileName}`,
+        filters: [{ name: 'WAV 音频', extensions: ['wav'] }]
+      })
+
+      if (saveResult.canceled || !saveResult.filePath) {
+        return
+      }
+
+      const result = await window.electronAPI.persona.exportVoiceSample({
+        sessionId: session.username,
+        displayName: session.displayName || session.username,
+        outputPath: saveResult.filePath
+      })
+
+      if (!result.success) {
+        showTopToast(result.error || '导出复刻语音样本失败', false)
+        return
+      }
+
+      const seconds = Math.round(result.sampleSeconds || 0)
+      showTopToast(`复刻语音样本已导出（${seconds} 秒）`, true)
+    } catch (e) {
+      showTopToast(`导出复刻语音样本失败: ${String(e)}`, false)
+    } finally {
+      setIsExportingVoiceSample(false)
+    }
+  }, [currentSessionId, isExportingVoiceSample, sessions, showTopToast])
 
   // 检查图片密钥配置（XOR 和 AES 都需要配置）
   useEffect(() => {
@@ -1539,6 +1590,8 @@ function ChatPage(_props: ChatPageProps) {
                 isBatchTranscribing={isBatchTranscribing}
                 batchTranscribeProgress={batchTranscribeProgress}
                 onBatchTranscribe={handleBatchTranscribe}
+                isExportingVoiceSample={isExportingVoiceSample}
+                onExportVoiceCloneSample={exportVoiceCloneSample}
                 isBatchDecrypting={isBatchDecrypting}
                 batchDecryptProgress={batchDecryptProgress}
                 onBatchDecrypt={handleBatchDecrypt}
