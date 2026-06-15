@@ -102,6 +102,11 @@ export const ONBOARDING_PROFILE_UIDS = [
   'profile:interaction-preference'
 ]
 const ONBOARDING_PROFILE_UID_SET = new Set(ONBOARDING_PROFILE_UIDS)
+// 仅迁移新版 Markdown 记忆系统实际使用的「策展型」记忆类型；旧版 message/conversation_block/
+// timeline_summary/media 是为已移除的向量检索逐条消息建的索引，新系统用不到，迁过来只会砸出
+// 上万个 .md 文件并拖垮 listMemoryItems/syncDerivedMarkdown，故按 source_type 过滤掉。
+const MIGRATABLE_SOURCE_TYPES: MemorySourceType[] = ['fact', 'relationship', 'profile']
+const MIGRATABLE_SOURCE_TYPES_SQL = MIGRATABLE_SOURCE_TYPES.map((type) => `'${type}'`).join(', ')
 
 export type MarkdownMemoryRetrievalMode = 'fact' | 'recent' | 'topic'
 
@@ -1187,7 +1192,7 @@ export class MemoryDatabase {
       try {
         const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_items'").get()
         if (!row) return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount }
-        const countRow = db.prepare('SELECT COUNT(*) AS count FROM memory_items').get() as { count: number } | undefined
+        const countRow = db.prepare(`SELECT COUNT(*) AS count FROM memory_items WHERE source_type IN (${MIGRATABLE_SOURCE_TYPES_SQL})`).get() as { count: number } | undefined
         const itemCount = Number(countRow?.count || 0)
         const meta = this.readMeta()
         const migratedLegacyCount = Number(meta.migratedLegacyItemCount || 0)
@@ -1213,7 +1218,7 @@ export class MemoryDatabase {
 
     const db = new Database(status.legacyDbPath, { readonly: true, fileMustExist: true })
     try {
-      const rows = db.prepare('SELECT * FROM memory_items ORDER BY created_at ASC, id ASC').all() as MemoryItemRow[]
+      const rows = db.prepare(`SELECT * FROM memory_items WHERE source_type IN (${MIGRATABLE_SOURCE_TYPES_SQL}) ORDER BY created_at ASC, id ASC`).all() as MemoryItemRow[]
       const index = this.readItemIndex()
       const meta = this.readMeta()
       let lastId = Math.max(index.maxId, Math.floor(Number(meta.lastId || 0)))

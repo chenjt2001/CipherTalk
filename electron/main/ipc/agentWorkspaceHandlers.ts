@@ -20,6 +20,7 @@ export function registerAgentWorkspaceHandlers(ctx: MainProcessContext): void {
 
   ipcMain.handle('agentWorkspace:stopDevServer', async () => {
     try {
+      await codeWorkspaceService.ensureWorkspaceInitialized()
       const result = await codeWorkspaceService.handleToolCall({ method: 'stop_dev_server' })
       return { success: true, result, state: codeWorkspaceService.getState() }
     } catch (error: any) {
@@ -28,7 +29,20 @@ export function registerAgentWorkspaceHandlers(ctx: MainProcessContext): void {
   })
 
   ipcMain.handle('agentWorkspace:getState', async () => {
-    return { success: true, state: codeWorkspaceService.getState() }
+    try {
+      await codeWorkspaceService.ensureWorkspaceInitialized()
+      return { success: true, state: codeWorkspaceService.getState() }
+    } catch (error: any) {
+      return { success: false, error: error?.message || String(error) }
+    }
+  })
+
+  ipcMain.handle('agentWorkspace:listFiles', async (_event, payload: unknown) => {
+    try {
+      return await codeWorkspaceService.listFilesForUi(payload && typeof payload === 'object' ? payload as Record<string, unknown> : {})
+    } catch (error: any) {
+      return { success: false, error: error?.message || String(error) }
+    }
   })
 
   ipcMain.handle('agentWorkspace:approve', async (_event, requestId: string) => {

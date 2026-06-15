@@ -822,7 +822,7 @@ export class WcdbCore {
       const result = this.wcdbGetLogs(outPtr)
       if (result === 0 && outPtr[0]) {
         const jsonStr = this.koffi.decode(outPtr[0], 'char', -1)
-        console.error('WCDB 内部日志:', jsonStr)
+        // console.error('WCDB 内部日志:', jsonStr)
         this.wcdbFreeString(outPtr[0])
         return jsonStr
       }

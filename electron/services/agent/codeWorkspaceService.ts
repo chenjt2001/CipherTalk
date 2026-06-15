@@ -10,6 +10,8 @@ import type {
   CodeWorkspaceApprovalRequest,
   CodeWorkspaceApprovalRisk,
   CodeWorkspaceEvent,
+  CodeWorkspaceFileItem,
+  CodeWorkspaceListFilesResult,
   CodeWorkspaceRef,
   CodeWorkspaceState,
   CodeWorkspaceToolCall,
@@ -61,6 +63,21 @@ type ResolvedPath = {
   root: string
 }
 
+type CommandSpec = {
+  command: string
+  args: string[]
+  display: string
+}
+
+type NormalizedCommand = {
+  mode: 'spawn'
+  command: string
+  args: string[]
+} | {
+  mode: 'shell'
+  commandLine: string
+}
+
 function normalizePathKey(value: string): string {
   const normalized = path.resolve(value)
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized
@@ -76,10 +93,8 @@ function truncateText(value: string, max = MAX_DIFF_CHARS): string {
   return value.length > max ? `${value.slice(0, max)}\n...<truncated>` : value
 }
 
-function splitCommandLine(value: string): { command: string; args: string[] } {
-  const tokens = value.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((item) => item.replace(/^"|"$/g, '')) ?? []
-  const [command = '', ...args] = tokens
-  return { command, args }
+function formatCommandText(command: string, args: string[]): string {
+  return [command, ...args].join(' ')
 }
 
 function commandForPlatform(command: string): string {
@@ -87,6 +102,39 @@ function commandForPlatform(command: string): string {
   if (/[\\/]/.test(command) || /\.[a-z0-9]+$/i.test(command)) return command
   if (['npm', 'npx', 'pnpm', 'yarn'].includes(command.toLowerCase())) return `${command}.cmd`
   return command
+}
+
+function commandCandidatesForPlatform(command: string, args: string[]): CommandSpec[] {
+  if (process.platform === 'win32' && !/[\\/]/.test(command) && command.toLowerCase() === 'python3') {
+    const pyArgs = ['-3', ...args]
+    return [
+      { command: 'py', args: pyArgs, display: formatCommandText('py', pyArgs) },
+      { command: 'python', args, display: formatCommandText('python', args) },
+    ]
+  }
+  return [{ command: commandForPlatform(command), args, display: formatCommandText(command, args) }]
+}
+
+function approvalCommandText(candidates: CommandSpec[]): string {
+  const [primary, ...fallbacks] = candidates
+  if (!primary) return ''
+  if (fallbacks.length === 0) return primary.display
+  return `${primary.display} (fallback: ${fallbacks.map((item) => item.display).join(' / ')})`
+}
+
+function shellCommandForPlatform(commandLine: string): CommandSpec {
+  if (process.platform === 'win32') {
+    return {
+      command: 'powershell.exe',
+      args: ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', commandLine],
+      display: commandLine,
+    }
+  }
+  return {
+    command: process.env.SHELL || '/bin/sh',
+    args: ['-lc', commandLine],
+    display: commandLine,
+  }
 }
 
 function looksShellLike(command: string, args: string[]): boolean {
@@ -118,6 +166,7 @@ function buildDiffPreview(displayPath: string, before: string, after: string): s
 export class CodeWorkspaceService {
   private ctx: MainProcessContext | null = null
   private workspace: CodeWorkspaceRef | null = null
+  private workspaceInit: Promise<void> | null = null
   private pendingApprovals = new Map<string, PendingApproval>()
   private devServer: ChildProcessWithoutNullStreams | null = null
   private devServerCommand = ''
@@ -127,17 +176,16 @@ export class CodeWorkspaceService {
 
   setContext(ctx: MainProcessContext): void {
     this.ctx = ctx
-    if (!this.workspace) {
-      const configured = this.readConfiguredWorkspaceRoot()
-      if (configured) void this.setWorkspaceRoot(configured).catch(() => undefined)
-    }
+    void this.ensureWorkspaceInitialized().catch(() => undefined)
   }
 
   async selectWorkspace(): Promise<{ success: boolean; canceled?: boolean; state?: CodeWorkspaceState; error?: string }> {
     try {
       const { dialog } = await import('electron')
+      const defaultPath = await this.ensureDefaultWorkspaceDir()
       const result = await dialog.showOpenDialog({
         title: '选择代码工作区',
+        defaultPath,
         properties: ['openDirectory', 'createDirectory'],
       })
       if (result.canceled || result.filePaths.length === 0) {
@@ -155,8 +203,19 @@ export class CodeWorkspaceService {
     this.rejectAllApprovals()
     this.workspace = null
     this.writeConfiguredWorkspaceRoot('')
+    await this.ensureWorkspaceInitialized()
     this.broadcast({ type: 'state', state: this.getState(), at: Date.now() })
     return this.getState()
+  }
+
+  async ensureWorkspaceInitialized(): Promise<void> {
+    if (this.workspace) return
+    if (!this.workspaceInit) {
+      this.workspaceInit = this.initializeWorkspace().finally(() => {
+        this.workspaceInit = null
+      })
+    }
+    await this.workspaceInit
   }
 
   getState(): CodeWorkspaceState {
@@ -181,7 +240,13 @@ export class CodeWorkspaceService {
     return this.resolveApproval(requestId, 'rejected')
   }
 
+  async listFilesForUi(args: Record<string, unknown>): Promise<CodeWorkspaceListFilesResult> {
+    await this.ensureWorkspaceInitialized()
+    return this.listFiles(args)
+  }
+
   async handleToolCall(call: CodeWorkspaceToolCall): Promise<unknown> {
+    await this.ensureWorkspaceInitialized()
     if (call.workspace?.root) {
       await this.ensureWorkspaceFromTool(call.workspace)
     }
@@ -228,6 +293,37 @@ export class CodeWorkspaceService {
     } finally {
       config.close()
     }
+  }
+
+  private async initializeWorkspace(): Promise<void> {
+    const configured = this.readConfiguredWorkspaceRoot()
+    if (configured) {
+      try {
+        await this.setWorkspaceRoot(configured)
+        return
+      } catch (error: any) {
+        this.appendLog(`[workspace] configured root unavailable: ${error?.message || String(error)}`)
+        this.writeConfiguredWorkspaceRoot('')
+      }
+    }
+
+    const defaultRoot = await this.ensureDefaultWorkspaceDir()
+    await this.setWorkspaceRoot(defaultRoot)
+  }
+
+  private getDefaultWorkspaceRoot(): string {
+    const config = new ConfigService()
+    try {
+      return path.join(config.getCacheBasePath(), 'code')
+    } finally {
+      config.close()
+    }
+  }
+
+  private async ensureDefaultWorkspaceDir(): Promise<string> {
+    const root = this.getDefaultWorkspaceRoot()
+    await fs.promises.mkdir(root, { recursive: true })
+    return root
   }
 
   private async setWorkspaceRoot(root: string): Promise<void> {
@@ -363,13 +459,13 @@ export class CodeWorkspaceService {
     return { success: true, state: this.getState(), projectHints: entries }
   }
 
-  private async listFiles(args: Record<string, unknown>): Promise<unknown> {
+  private async listFiles(args: Record<string, unknown>): Promise<CodeWorkspaceListFilesResult> {
     const start = await this.resolvePath(args.path || '.')
     const stat = await fs.promises.stat(start.absPath)
     if (!stat.isDirectory()) return { success: false, error: '路径不是目录' }
     const maxDepth = Math.max(0, Math.min(8, Number(args.maxDepth ?? 3)))
     const limit = Math.max(1, Math.min(MAX_LIST_ITEMS, Number(args.limit ?? 200)))
-    const items: Array<{ path: string; type: 'file' | 'dir'; sizeBytes?: number }> = []
+    const items: CodeWorkspaceFileItem[] = []
     const queue: Array<{ absPath: string; depth: number }> = [{ absPath: start.absPath, depth: 0 }]
 
     while (queue.length > 0 && items.length < limit) {
@@ -484,15 +580,16 @@ export class CodeWorkspaceService {
     const workspace = this.requireWorkspace()
     const parsed = this.normalizeCommand(args)
     const cwd = args.cwd ? (await this.resolvePath(args.cwd)).absPath : workspace.root
-    const commandText = [parsed.command, ...parsed.args].join(' ')
+    const candidates = parsed.mode === 'shell' ? [shellCommandForPlatform(parsed.commandLine)] : commandCandidatesForPlatform(parsed.command, parsed.args)
+    const commandText = approvalCommandText(candidates)
     const approved = await this.requestApproval({
       kind: 'command',
       command: commandText,
-      risk: looksShellLike(parsed.command, parsed.args) ? 'high' : 'medium',
+      risk: parsed.mode === 'shell' || looksShellLike(parsed.command, parsed.args) ? 'high' : 'medium',
       summary: `运行命令 ${commandText}`,
     })
     if (!approved) return { success: false, denied: true, error: '用户拒绝运行命令', command: commandText }
-    return this.spawnAndCollect(parsed.command, parsed.args, cwd, Number(args.timeoutMs) || COMMAND_TIMEOUT_MS)
+    return this.spawnAndCollectCandidates(candidates, cwd, Number(args.timeoutMs) || COMMAND_TIMEOUT_MS)
   }
 
   private async startDevServer(args: Record<string, unknown>): Promise<unknown> {
@@ -502,43 +599,74 @@ export class CodeWorkspaceService {
     }
     const parsed = this.normalizeCommand(args, { defaultCommand: 'npm', defaultArgs: ['run', 'dev'] })
     const cwd = args.cwd ? (await this.resolvePath(args.cwd)).absPath : workspace.root
-    const commandText = [parsed.command, ...parsed.args].join(' ')
+    const candidates = parsed.mode === 'shell' ? [shellCommandForPlatform(parsed.commandLine)] : commandCandidatesForPlatform(parsed.command, parsed.args)
+    const commandText = approvalCommandText(candidates)
     const approved = await this.requestApproval({
       kind: 'dev-server',
       command: commandText,
-      risk: 'medium',
+      risk: parsed.mode === 'shell' ? 'high' : 'medium',
       summary: `启动开发服务器 ${commandText}`,
     })
     if (!approved) return { success: false, denied: true, error: '用户拒绝启动开发服务器', command: commandText }
 
     this.logs = []
-    this.devServerCommand = commandText
-    this.devServerStartedAt = Date.now()
     this.devServerPreviewUrl = ''
-    const child = spawn(commandForPlatform(parsed.command), parsed.args, {
-      cwd,
-      shell: false,
-      env: { ...process.env, BROWSER: 'none', HOST: '127.0.0.1' },
-      windowsHide: true,
-    })
-    this.devServer = child
-    this.appendLog(`$ ${commandText}`)
-    child.stdout.on('data', (chunk) => this.handleDevServerOutput(chunk.toString()))
-    child.stderr.on('data', (chunk) => this.handleDevServerOutput(chunk.toString()))
-    child.on('exit', (code, signal) => {
-      this.appendLog(`[dev-server exited] code=${code ?? 'null'} signal=${signal ?? 'null'}`)
-      this.devServer = null
-      this.broadcast({ type: 'state', state: this.getState(), at: Date.now() })
-    })
-    child.on('error', (error) => {
-      this.appendLog(`[dev-server error] ${error.message}`)
-      this.devServer = null
-      this.broadcast({ type: 'state', state: this.getState(), at: Date.now() })
-    })
+    let lastError = '开发服务器启动失败'
+    for (const [index, candidate] of candidates.entries()) {
+      if (index > 0) this.appendLog(`[dev-server retry] ${candidate.display}`)
+      const result = await this.spawnDevServerCandidate(candidate, cwd)
+      if (result.success) {
+        this.broadcast({ type: 'state', state: this.getState(), at: Date.now() })
+        return { success: true, state: this.getState(), logs: this.logs.slice(-120) }
+      }
+      lastError = result.error
+      if (result.code !== 'ENOENT') break
+    }
 
-    await new Promise((resolve) => setTimeout(resolve, DEV_SERVER_READY_TIMEOUT_MS))
+    this.devServer = null
+    this.devServerCommand = ''
+    this.devServerStartedAt = 0
     this.broadcast({ type: 'state', state: this.getState(), at: Date.now() })
-    return { success: true, state: this.getState(), logs: this.logs.slice(-120) }
+    return { success: false, command: commandText, error: lastError, state: this.getState(), logs: this.logs.slice(-120) }
+  }
+
+  private spawnDevServerCandidate(candidate: CommandSpec, cwd: string): Promise<{ success: true } | { success: false; error: string; code?: string }> {
+    this.devServerCommand = candidate.display
+    this.devServerStartedAt = Date.now()
+    this.appendLog(`$ ${candidate.display}`)
+
+    return new Promise((resolve) => {
+      const child = spawn(candidate.command, candidate.args, {
+        cwd,
+        shell: false,
+        env: { ...process.env, BROWSER: 'none', HOST: '127.0.0.1' },
+        windowsHide: true,
+      })
+      this.devServer = child
+      let settled = false
+      const settle = (result: { success: true } | { success: false; error: string; code?: string }) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(result)
+      }
+      const timer = setTimeout(() => settle({ success: true }), DEV_SERVER_READY_TIMEOUT_MS)
+
+      child.stdout.on('data', (chunk) => this.handleDevServerOutput(chunk.toString()))
+      child.stderr.on('data', (chunk) => this.handleDevServerOutput(chunk.toString()))
+      child.on('exit', (code, signal) => {
+        this.appendLog(`[dev-server exited] code=${code ?? 'null'} signal=${signal ?? 'null'}`)
+        if (this.devServer === child) this.devServer = null
+        this.broadcast({ type: 'state', state: this.getState(), at: Date.now() })
+        settle({ success: false, error: `开发服务器已退出 code=${code ?? 'null'}${signal ? ` signal=${signal}` : ''}` })
+      })
+      child.on('error', (error: NodeJS.ErrnoException) => {
+        this.appendLog(`[dev-server error] ${error.message}`)
+        if (this.devServer === child) this.devServer = null
+        this.broadcast({ type: 'state', state: this.getState(), at: Date.now() })
+        settle({ success: false, error: error.message, code: error.code })
+      })
+    })
   }
 
   private async stopDevServer(): Promise<unknown> {
@@ -571,27 +699,37 @@ export class CodeWorkspaceService {
     }
   }
 
-  private normalizeCommand(args: Record<string, unknown>, fallback?: { defaultCommand: string; defaultArgs: string[] }): { command: string; args: string[] } {
+  private normalizeCommand(args: Record<string, unknown>, fallback?: { defaultCommand: string; defaultArgs: string[] }): NormalizedCommand {
+    const commandLine = typeof args.commandLine === 'string' ? args.commandLine.trim() : ''
+    if (commandLine) {
+      return { mode: 'shell', commandLine }
+    }
     let command = String(args.command || '').trim()
     let commandArgs = Array.isArray(args.args) ? args.args.map(String) : []
-    if (!command && typeof args.commandLine === 'string') {
-      const parsed = splitCommandLine(args.commandLine)
-      command = parsed.command
-      commandArgs = parsed.args
-    }
     if (!command && fallback) {
       command = fallback.defaultCommand
       commandArgs = fallback.defaultArgs
     }
     if (!command) throw new Error('command 不能为空')
-    return { command, args: commandArgs }
+    return { mode: 'spawn', command, args: commandArgs }
   }
 
-  private spawnAndCollect(command: string, args: string[], cwd: string, timeoutMs: number): Promise<unknown> {
-    const commandText = [command, ...args].join(' ')
-    this.appendLog(`$ ${commandText}`)
+  private async spawnAndCollectCandidates(candidates: CommandSpec[], cwd: string, timeoutMs: number): Promise<unknown> {
+    let lastResult: unknown = { success: false, error: '命令执行失败' }
+    for (const [index, candidate] of candidates.entries()) {
+      if (index > 0) this.appendLog(`[command retry] ${candidate.display}`)
+      const result = await this.spawnAndCollectCandidate(candidate, cwd, timeoutMs)
+      lastResult = result
+      const meta = result as { success?: boolean; spawnErrorCode?: string }
+      if (meta.success || meta.spawnErrorCode !== 'ENOENT') return result
+    }
+    return lastResult
+  }
+
+  private spawnAndCollectCandidate(candidate: CommandSpec, cwd: string, timeoutMs: number): Promise<unknown> {
+    this.appendLog(`$ ${candidate.display}`)
     return new Promise((resolve) => {
-      const child = spawn(commandForPlatform(command), args, {
+      const child = spawn(candidate.command, candidate.args, {
         cwd,
         shell: false,
         env: { ...process.env, BROWSER: 'none' },
@@ -604,7 +742,7 @@ export class CodeWorkspaceService {
         if (finished) return
         finished = true
         try { child.kill('SIGTERM') } catch { /* ignore */ }
-        resolve({ success: false, timedOut: true, command: commandText, stdout: truncateText(stdout), stderr: truncateText(stderr), error: '命令执行超时' })
+        resolve({ success: false, timedOut: true, command: candidate.display, stdout: truncateText(stdout), stderr: truncateText(stderr), error: '命令执行超时' })
       }, Math.max(1_000, Math.min(COMMAND_TIMEOUT_MS, timeoutMs)))
 
       child.stdout.on('data', (chunk) => {
@@ -617,11 +755,18 @@ export class CodeWorkspaceService {
         stderr += text
         this.appendLog(text)
       })
-      child.on('error', (error) => {
+      child.on('error', (error: NodeJS.ErrnoException) => {
         if (finished) return
         finished = true
         clearTimeout(timer)
-        resolve({ success: false, command: commandText, error: error.message, stdout: truncateText(stdout), stderr: truncateText(stderr) })
+        resolve({
+          success: false,
+          command: candidate.display,
+          error: error.message,
+          spawnErrorCode: error.code,
+          stdout: truncateText(stdout),
+          stderr: truncateText(stderr),
+        })
       })
       child.on('exit', (code, signal) => {
         if (finished) return
@@ -629,7 +774,7 @@ export class CodeWorkspaceService {
         clearTimeout(timer)
         resolve({
           success: code === 0,
-          command: commandText,
+          command: candidate.display,
           exitCode: code,
           signal,
           stdout: truncateText(stdout),

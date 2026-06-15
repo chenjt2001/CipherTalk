@@ -29,8 +29,8 @@ import {
   DownloadIcon,
   ExternalLinkIcon,
   EyeIcon,
+  FileIcon,
   Loader2Icon,
-  PaperclipIcon,
   Table2Icon,
   XIcon,
 } from "lucide-react";
@@ -763,6 +763,10 @@ type MessageLinkProps = ComponentProps<"a"> & {
 
 const EXTERNAL_HREF_RE = /^(https?:)?\/\//i;
 
+function toExternalHref(href: string): string {
+  return href.startsWith("//") ? `https:${href}` : href;
+}
+
 const MessageLink = ({ children, className, href, node: _node, ...props }: MessageLinkProps) => {
   const external = Boolean(href && EXTERNAL_HREF_RE.test(href));
   const childItems = Children.toArray(children).filter((item) => item !== "");
@@ -776,6 +780,12 @@ const MessageLink = ({ children, className, href, node: _node, ...props }: Messa
       )}
       href={href}
       {...props}
+      onClick={(event) => {
+        props.onClick?.(event);
+        if (event.defaultPrevented || !external || !href) return;
+        event.preventDefault();
+        void window.electronAPI.shell.openExternal(toExternalHref(href));
+      }}
       rel={external ? "noreferrer" : props.rel}
       target={external ? "_blank" : props.target}
     >
@@ -1202,6 +1212,19 @@ export const MessageResponse = memo(
 
 MessageResponse.displayName = "MessageResponse";
 
+function formatAttachmentSize(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return "大小未知";
+  }
+  if (value < 1024) return `${value} B`;
+  const kb = value / 1024;
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+  const gb = mb / 1024;
+  return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`;
+}
+
 export type MessageAttachmentProps = HTMLAttributes<HTMLDivElement> & {
   data: FileUIPart;
   className?: string;
@@ -1219,11 +1242,15 @@ export function MessageAttachment({
     data.mediaType?.startsWith("image/") && data.url ? "image" : "file";
   const isImage = mediaType === "image";
   const attachmentLabel = filename || (isImage ? "Image" : "Attachment");
+  const sizeBytes = (data as FileUIPart & { sizeBytes?: unknown }).sizeBytes;
+  const attachmentSize = formatAttachmentSize(sizeBytes);
 
   return (
     <div
       className={cn(
-        "group relative size-24 overflow-hidden rounded-(--agent-radius,12px)",
+        isImage
+          ? "group relative size-24 overflow-hidden rounded-(--agent-radius,12px)"
+          : "group relative flex min-h-16 w-72 max-w-full items-center gap-3 rounded-(--agent-radius,12px) border border-border/70 bg-card/80 px-3 py-2 text-left shadow-xs",
         className
       )}
       {...props}
@@ -1255,20 +1282,32 @@ export function MessageAttachment({
         </>
       ) : (
         <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex size-full shrink-0 items-center justify-center rounded-(--agent-radius,12px) bg-muted text-muted-foreground">
-                <PaperclipIcon className="size-4" />
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{attachmentLabel}</p>
-            </TooltipContent>
-          </Tooltip>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-(--agent-radius,12px) bg-muted text-muted-foreground">
+                    <FileIcon className="size-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-foreground text-sm">
+                      {attachmentLabel}
+                    </div>
+                    <div className="mt-0.5 text-muted-foreground text-xs">
+                      {attachmentSize}
+                    </div>
+                  </div>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{attachmentLabel} · {attachmentSize}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {onRemove && (
             <Button
               aria-label="Remove attachment"
-              className="size-6 shrink-0 rounded-(--agent-radius,12px) p-0 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100 [&>svg]:size-3"
+              className="absolute top-2 right-2 size-6 shrink-0 rounded-(--agent-radius,12px) bg-background/80 p-0 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100 [&>svg]:size-3"
               onClick={(e) => {
                 e.stopPropagation();
                 onRemove();

@@ -99,16 +99,18 @@ export function createCodeWorkspaceTools(
 
     code_run_command: tool({
       description:
-        '在工作区内运行短命令并收集 stdout/stderr。必须用 command + args 数组；主进程用 spawn(command,args) 且不走 shell。安装依赖、测试、脚本执行都会先请求用户确认。',
+        '在工作区内运行短命令并收集 stdout/stderr。优先用 command + args 结构化执行；需要 &&、管道、重定向、平台终端语法时用 commandLine 走受控 shell。安装依赖、测试、脚本执行都会先请求用户确认。',
       inputSchema: z.object({
-        command: z.string().min(1).describe('可执行命令，例如 npm、npx、pnpm、node'),
+        command: z.string().optional().describe('可执行命令，例如 npm、npx、pnpm、node。使用 commandLine 时可省略'),
         args: z.array(z.string()).default([]).describe('命令参数数组，例如 ["install"] 或 ["tsc","--noEmit"]'),
+        commandLine: z.string().optional().describe('整行终端命令；会走 shell 并按高风险确认，例如 "npm install && npm run dev"'),
         cwd: z.string().optional().describe('相对 workspace root 的工作目录；默认 workspace root'),
         timeoutMs: z.number().int().min(1000).max(300000).optional().describe('超时时间，默认 5 分钟，上限 5 分钟'),
       }),
-      execute: async ({ command, args, cwd, timeoutMs }) => callCodeWorkspace(workspace, 'run_command', {
+      execute: async ({ command, args, commandLine, cwd, timeoutMs }) => callCodeWorkspace(workspace, 'run_command', {
         command,
         args,
+        commandLine,
         cwd,
         timeoutMs,
       }),
@@ -116,15 +118,17 @@ export function createCodeWorkspaceTools(
 
     code_start_dev_server: tool({
       description:
-        '启动前端 dev server 并检测本机预览地址。默认命令是 npm run dev；长进程由主进程托管，启动前会请求用户确认，只接受 localhost/127.0.0.1 预览。',
+        '启动前端 dev server 并检测本机预览地址。默认命令是 npm run dev；优先用 command + args，复杂终端语法用 commandLine。长进程由主进程托管，启动前会请求用户确认，只接受 localhost/127.0.0.1 预览。',
       inputSchema: z.object({
-        command: z.string().optional().describe('可执行命令，省略则使用 npm'),
+        command: z.string().optional().describe('可执行命令，省略则使用 npm。使用 commandLine 时可省略'),
         args: z.array(z.string()).optional().describe('命令参数，省略则使用 ["run","dev"]'),
+        commandLine: z.string().optional().describe('整行 dev server 命令；会走 shell 并按高风险确认'),
         cwd: z.string().optional().describe('相对 workspace root 的工作目录；默认 workspace root'),
       }),
-      execute: async ({ command, args, cwd }) => callCodeWorkspace(workspace, 'start_dev_server', {
+      execute: async ({ command, args, commandLine, cwd }) => callCodeWorkspace(workspace, 'start_dev_server', {
         command,
         args,
+        commandLine,
         cwd,
       }),
     }),

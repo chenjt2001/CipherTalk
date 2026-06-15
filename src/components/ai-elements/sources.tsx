@@ -59,19 +59,35 @@ export const SourcesContent = ({
 
 export type SourceProps = ComponentProps<"a">;
 
-export const Source = ({ href, title, children, ...props }: SourceProps) => (
-  <a
-    className="flex items-center gap-2"
-    href={href}
-    rel="noreferrer"
-    target="_blank"
-    {...props}
-  >
-    {children ?? (
-      <>
-        <BookIcon className="h-4 w-4" />
-        <span className="block font-medium">{title}</span>
-      </>
-    )}
-  </a>
-);
+const EXTERNAL_HREF_RE = /^(https?:)?\/\//i;
+
+function toExternalHref(href: string): string {
+  return href.startsWith("//") ? `https:${href}` : href;
+}
+
+export const Source = ({ href, title, children, ...props }: SourceProps) => {
+  const external = Boolean(href && EXTERNAL_HREF_RE.test(href));
+
+  return (
+    <a
+      className="flex items-center gap-2"
+      href={href}
+      {...props}
+      onClick={(event) => {
+        props.onClick?.(event);
+        if (event.defaultPrevented || !external || !href) return;
+        event.preventDefault();
+        void window.electronAPI.shell.openExternal(toExternalHref(href));
+      }}
+      rel={external ? "noreferrer" : props.rel}
+      target={external ? "_blank" : props.target}
+    >
+      {children ?? (
+        <>
+          <BookIcon className="h-4 w-4" />
+          <span className="block font-medium">{title}</span>
+        </>
+      )}
+    </a>
+  );
+};

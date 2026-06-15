@@ -127,7 +127,7 @@ export const CODE_WORKSPACE_PROMPT = `
 - 动手前先用 code_workspace_status / code_list_files / code_read_file 理解项目结构；改小块优先用 code_replace_in_file，创建或完整覆盖才用 code_write_file。
 - 写文件、删除文件、运行命令、安装依赖、启动 dev server 都需要用户确认；如果工具返回 denied，要停止该操作并向用户说明未改动。
 - .env、密钥、证书、token 等敏感文件默认不读；除非用户明确要求且通过高风险确认。
-- 不要把二进制文件、大文件或密钥内容塞进回答。命令必须优先用 command + args 数组，不要拼 shell 字符串。
+- 不要把二进制文件、大文件或密钥内容塞进回答。命令优先用 command + args 数组；需要 &&、管道、重定向、平台终端语法时才用 commandLine，commandLine 会走 shell 并按高风险确认。
 - 长进程用 code_start_dev_server，不要用 code_run_command 启动 dev server。预览 URL 只接受 localhost / 127.0.0.1。
 - 如果用户让你先总结聊天记录再生成网页，可以先用聊天工具得到内容，再用代码工具把它写成网页并启动预览。`
 

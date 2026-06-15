@@ -22,6 +22,20 @@ export interface CodeWorkspaceState {
   recentLogs: string[]
 }
 
+export interface CodeWorkspaceFileItem {
+  path: string
+  type: 'file' | 'dir'
+  sizeBytes?: number
+}
+
+export interface CodeWorkspaceListFilesResult {
+  success: boolean
+  root?: string
+  items?: CodeWorkspaceFileItem[]
+  truncated?: boolean
+  error?: string
+}
+
 export interface CodeWorkspaceApprovalRequest {
   requestId: string
   kind: CodeWorkspaceApprovalKind

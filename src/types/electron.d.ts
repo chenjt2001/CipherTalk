@@ -183,6 +183,20 @@ export interface CodeWorkspaceState {
   recentLogs: string[]
 }
 
+export interface CodeWorkspaceFileItem {
+  path: string
+  type: 'file' | 'dir'
+  sizeBytes?: number
+}
+
+export interface CodeWorkspaceListFilesResult {
+  success: boolean
+  root?: string
+  items?: CodeWorkspaceFileItem[]
+  truncated?: boolean
+  error?: string
+}
+
 export interface CodeWorkspaceApprovalRequest {
   requestId: string
   kind: CodeWorkspaceApprovalKind
@@ -1295,6 +1309,7 @@ export interface ElectronAPI {
     clearWorkspace: () => Promise<{ success: boolean; state?: CodeWorkspaceState; error?: string }>
     stopDevServer: () => Promise<{ success: boolean; state?: CodeWorkspaceState; result?: unknown; error?: string }>
     getState: () => Promise<{ success: boolean; state?: CodeWorkspaceState; error?: string }>
+    listFiles: (payload: { path?: string; maxDepth?: number; limit?: number }) => Promise<CodeWorkspaceListFilesResult>
     approve: (requestId: string) => Promise<{ success: boolean; error?: string }>
     reject: (requestId: string, reason?: string) => Promise<{ success: boolean; error?: string }>
     onApprovalRequest: (callback: (request: CodeWorkspaceApprovalRequest) => void) => () => void
