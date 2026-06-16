@@ -244,6 +244,7 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
   let welcomeWindow: BrowserWindow | null = null
   let chatHistoryWindow: BrowserWindow | null = null
   let personaChatWindow: BrowserWindow | null = null
+  let posterStyleWindow: BrowserWindow | null = null
   let petWindow: BrowserWindow | null = null
   let petBaseBounds: { x: number; y: number; width: number; height: number } | null = null
   // 桌宠基础尺寸（与 openPetWindow 一致）；显示消息气泡时临时向上/左扩窗腾出空间
@@ -730,6 +731,48 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
         personaChatWindow = null
       })
       return personaChatWindow
+    },
+
+    openPosterStyleWindow() {
+      if (posterStyleWindow && !posterStyleWindow.isDestroyed()) {
+        if (posterStyleWindow.isMinimized()) posterStyleWindow.restore()
+        posterStyleWindow.show()
+        posterStyleWindow.focus()
+        return posterStyleWindow
+      }
+
+      const isDark = nativeTheme.shouldUseDarkColors
+      posterStyleWindow = new BrowserWindow({
+        width: 1120,
+        height: 760,
+        minWidth: 860,
+        minHeight: 560,
+        ...getWindowIconOptions(ctx),
+        webPreferences: {
+          preload: join(__dirname, 'preload.js'),
+          devTools: ctx.allowDevTools,
+          contextIsolation: true,
+          nodeIntegration: false,
+          webSecurity: false
+        },
+        titleBarStyle: 'hidden',
+        titleBarOverlay: {
+          color: '#00000000',
+          symbolColor: isDark ? '#ffffff' : '#1a1a1a',
+          height: 34
+        },
+        title: '海报编辑器',
+        show: false,
+        backgroundColor: '#15161a',
+        autoHideMenuBar: true
+      })
+
+      posterStyleWindow.once('ready-to-show', () => posterStyleWindow?.show())
+      loadWindowRoute(ctx, posterStyleWindow, '/poster-style-window')
+      posterStyleWindow.on('closed', () => {
+        posterStyleWindow = null
+      })
+      return posterStyleWindow
     },
 
     openAgreementWindow() {

@@ -435,6 +435,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openChatWindow: () => ipcRenderer.invoke('window:openChatWindow'),
     openMomentsWindow: (filterUsername?: string) => ipcRenderer.invoke('window:openMomentsWindow', filterUsername),
     openPersonaChatWindow: (sessionId: string) => ipcRenderer.invoke('window:openPersonaChatWindow', sessionId),
+    openPosterStyleWindow: () => ipcRenderer.invoke('window:openPosterStyleWindow'),
     onMomentsFilterUser: (callback: (username: string) => void) => {
       ipcRenderer.on('moments:filterUser', (_, username) => callback(username))
       return () => ipcRenderer.removeAllListeners('moments:filterUser')

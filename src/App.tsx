@@ -23,6 +23,7 @@ import ActivationPage from './pages/ActivationPage'
 import ImageWindow from './pages/ImageWindow'
 import VideoWindow from './pages/VideoWindow'
 import BrowserWindowPage from './pages/BrowserWindowPage'
+import PosterStyleWindow from './pages/PosterStyleWindow'
 import SplashPage from './pages/SplashPage'
 import ChatHistoryPage from './pages/ChatHistoryPage'
 import PersonaChatPage from './pages/PersonaChatPage'
@@ -375,9 +376,10 @@ function App() {
   const isMomentsWindow = location.pathname === '/moments-window'
   const isAgreementWindow = location.pathname === '/agreement-window'
   const isWelcomeWindow = location.pathname === '/welcome-window'
+  const isPosterStyleWindow = location.pathname === '/poster-style-window'
 
   useEffect(() => {
-    if (memoryMigrationDismissed || isChatWindow || isMomentsWindow || isAgreementWindow || isWelcomeWindow || location.pathname === '/splash') return
+    if (memoryMigrationDismissed || isChatWindow || isMomentsWindow || isAgreementWindow || isWelcomeWindow || isPosterStyleWindow || location.pathname === '/splash') return
     let cancelled = false
     const checkMemoryMigration = async () => {
       try {
@@ -393,7 +395,7 @@ function App() {
     }
     void checkMemoryMigration()
     return () => { cancelled = true }
-  }, [isAgreementWindow, isChatWindow, isMomentsWindow, isWelcomeWindow, location.pathname, memoryMigrationDismissed])
+  }, [isAgreementWindow, isChatWindow, isMomentsWindow, isPosterStyleWindow, isWelcomeWindow, location.pathname, memoryMigrationDismissed])
 
   const handleDismissMemoryMigration = () => {
     setMemoryMigrationDismissed(true)
@@ -424,7 +426,7 @@ function App() {
   // 启动时自动检查配置并连接数据库
   useEffect(() => {
     // 独立窗口不需要自动连接主数据库
-    if (isChatWindow || isMomentsWindow || isAgreementWindow || isWelcomeWindow || location.pathname === '/image-viewer-window' || location.pathname === '/pet-window') return
+    if (isChatWindow || isMomentsWindow || isAgreementWindow || isWelcomeWindow || isPosterStyleWindow || location.pathname === '/image-viewer-window' || location.pathname === '/pet-window') return
 
     const autoConnect = async () => {
       try {
@@ -492,7 +494,7 @@ function App() {
     }
 
     autoConnect()
-  }, [isChatWindow, isMomentsWindow, isAgreementWindow, isWelcomeWindow, location.pathname, navigate, setDbConnected])
+  }, [isChatWindow, isMomentsWindow, isAgreementWindow, isPosterStyleWindow, isWelcomeWindow, location.pathname, navigate, setDbConnected])
 
   // 独立聊天窗口 - 只显示聊天页面，无侧边栏
   if (isChatWindow) {
@@ -563,6 +565,15 @@ function App() {
       <div className="standalone-window">
         <TitleBar variant="standalone" />
         <BrowserWindowPage />
+      </div>
+    )
+  }
+
+  if (isPosterStyleWindow) {
+    return (
+      <div className="poster-style-standalone-window">
+        <div className="poster-style-drag-bar" />
+        <PosterStyleWindow />
       </div>
     )
   }

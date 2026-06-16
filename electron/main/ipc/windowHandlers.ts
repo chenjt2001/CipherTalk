@@ -154,6 +154,11 @@ export function registerWindowHandlers(ctx: MainProcessContext): void {
     return true
   })
 
+  ipcMain.handle('window:openPosterStyleWindow', async () => {
+    ctx.getWindowManager().openPosterStyleWindow()
+    return true
+  })
+
   ipcMain.handle('window:openAgreementWindow', async () => {
     ctx.getWindowManager().openAgreementWindow()
     return true

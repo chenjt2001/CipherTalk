@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { Copy, Download, Loader2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { Code2, Copy, Download, Loader2, X } from 'lucide-react'
 import type { ChatSession, Message } from '../../../types/models'
 import { isGroupChat, isSystemMessage } from '../utils/messageGuards'
 import { formatDateDivider, shouldShowDateDivider } from '../utils/time'
@@ -133,8 +133,6 @@ function getPosterExportOptions(node: HTMLElement) {
 
 export function SharePosterModal({ session, messages, myAvatarUrl, onClose, showTopToast }: SharePosterModalProps) {
   const cardRef = useRef<HTMLDivElement>(null)
-  const codeRef = useRef<HTMLTextAreaElement>(null)
-  const hlRef = useRef<HTMLDivElement>(null)
   const [saving, setSaving] = useState(false)
   const [copying, setCopying] = useState(false)
   const [senders, setSenders] = useState<Map<string, SenderInfo>>(new Map())
@@ -142,43 +140,48 @@ export function SharePosterModal({ session, messages, myAvatarUrl, onClose, show
 
   const [themeId, setThemeId] = useState('default')
   const [customThemes, setCustomThemes] = useState<CustomPosterTheme[]>([])
-  const [cssDraft, setCssDraft] = useState<{ id: string; css: string } | null>(null)
-  const [hlRange, setHlRange] = useState<[number, number] | null>(null)
 
   const ordered = useMemo(
     () => [...messages].sort((a, b) => a.createTime - b.createTime || a.sortSeq - b.sortSeq),
     [messages]
   )
 
-  // 读取已保存的自定义样式库与上次选择的主题
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const savedThemes = await window.electronAPI.config.get('posterCustomThemes')
-        const savedId = await window.electronAPI.config.get('posterThemeId')
-        const legacyCss = await window.electronAPI.config.get('posterCustomCss')
-        if (cancelled) return
+  const loadPosterThemeConfig = useCallback(async () => {
+    try {
+      const savedThemes = await window.electronAPI.config.get('posterCustomThemes')
+      const savedId = await window.electronAPI.config.get('posterThemeId')
+      const legacyCss = await window.electronAPI.config.get('posterCustomCss')
 
-        let themes: CustomPosterTheme[] = Array.isArray(savedThemes)
-          ? (savedThemes as CustomPosterTheme[]).filter((t) => t && t.id && typeof t.css === 'string')
-          : []
+      let themes: CustomPosterTheme[] = Array.isArray(savedThemes)
+        ? (savedThemes as CustomPosterTheme[]).filter((t) => t && t.id && typeof t.css === 'string')
+        : []
 
-        // 旧版单槽位自定义样式迁移进样式库
-        if (themes.length === 0 && typeof legacyCss === 'string' && legacyCss.trim()) {
-          themes = [{ id: createCustomThemeId(), name: '我的定制', css: legacyCss, createdAt: Date.now() }]
-          void window.electronAPI.config.set('posterCustomThemes', themes)
-          void window.electronAPI.config.set('posterCustomCss', '')
-        }
-
-        setCustomThemes(themes)
-        if (typeof savedId === 'string' && savedId) setThemeId(savedId)
-      } catch {
-        /* 使用默认主题 */
+      // 旧版单槽位自定义样式迁移进样式库
+      if (themes.length === 0 && typeof legacyCss === 'string' && legacyCss.trim()) {
+        themes = [{ id: createCustomThemeId(), name: '我的定制', css: legacyCss, createdAt: Date.now() }]
+        void window.electronAPI.config.set('posterCustomThemes', themes)
+        void window.electronAPI.config.set('posterCustomCss', '')
       }
-    })()
-    return () => { cancelled = true }
+
+      setCustomThemes(themes)
+      if (typeof savedId === 'string' && savedId) setThemeId(savedId)
+    } catch {
+      /* 使用默认主题 */
+    }
   }, [])
+
+  // 读取并监听已保存的自定义样式库与上次选择的主题
+  useEffect(() => {
+    void loadPosterThemeConfig()
+  }, [loadPosterThemeConfig])
+
+  useEffect(() => {
+    return window.electronAPI.config.onChanged((payload) => {
+      if (payload.key === 'posterCustomThemes' || payload.key === 'posterThemeId' || payload.key === 'posterCustomCss') {
+        void loadPosterThemeConfig()
+      }
+    })
+  }, [loadPosterThemeConfig])
 
   // 解析群聊发送者头像 / 昵称
   useEffect(() => {
@@ -216,17 +219,11 @@ export function SharePosterModal({ session, messages, myAvatarUrl, onClose, show
     [customThemes, themeId]
   )
 
-  // 自定义主题正在编辑的 CSS：草稿与当前主题匹配时用草稿，否则取主题原文
-  const editorCss = selectedCustom
-    ? (cssDraft?.id === selectedCustom.id ? cssDraft.css : selectedCustom.css)
-    : ''
-  const cssDirty = selectedCustom != null && editorCss !== selectedCustom.css
-
   const scopedThemeCss = useMemo(() => {
     const preset = POSTER_THEMES.find((t) => t.id === themeId)
     if (preset) return scopePosterCss(preset.css)
-    return selectedCustom ? scopePosterCss(editorCss) : ''
-  }, [themeId, selectedCustom, editorCss])
+    return selectedCustom ? scopePosterCss(selectedCustom.css) : ''
+  }, [themeId, selectedCustom])
 
   const resolveSender = (msg: Message): SenderInfo => {
     if (msg.isSend === 1) return { name: '我', avatarUrl: myAvatarUrl }
@@ -249,7 +246,6 @@ export function SharePosterModal({ session, messages, myAvatarUrl, onClose, show
 
   const selectTheme = (id: string) => {
     setThemeId(id)
-    setHlRange(null)
     void window.electronAPI.config.set('posterThemeId', id)
   }
 
@@ -264,23 +260,41 @@ export function SharePosterModal({ session, messages, myAvatarUrl, onClose, show
     if (themeId === id) selectTheme('default')
   }
 
-  const handleSaveCss = () => {
-    if (!selectedCustom || !cssDirty) return
-    if (!scopePosterCss(editorCss)) {
-      showTopToast('样式为空或属性都被过滤，请检查代码', false)
-      return
+  const buildStyleWindowContext = (focusRange?: [number, number]) => {
+    const sessionTitle = session.displayName || session.username
+    const sampleLines = ordered
+      .filter((msg) => !isSystemMessage(msg))
+      .slice(0, 12)
+      .map((msg) => {
+        const sender = msg.isSend === 1 ? '我' : resolveSender(msg).name
+        const content = (msg.parsedContent || '').replace(/\s+/g, ' ').slice(0, 90)
+        return `${sender}: ${content || '（空消息）'}`
+      })
+    return {
+      sessionTitle,
+      dateRange,
+      messageCount: ordered.length,
+      sampleLines,
+      themeId,
+      focusRange,
+      updatedAt: Date.now()
     }
-    persistCustomThemes(
-      customThemes.map((t) => (t.id === selectedCustom.id ? { ...t, css: editorCss } : t))
-    )
-    showTopToast('样式已更新', true)
+  }
+
+  const openStyleWorkbench = async (focusRange?: [number, number]) => {
+    try {
+      await window.electronAPI.config.set('posterStyleWindowContext', buildStyleWindowContext(focusRange))
+      await window.electronAPI.window.openPosterStyleWindow()
+    } catch (error) {
+      console.error('[SharePoster] 打开样式工作台失败', error)
+      showTopToast('打开样式工作台失败', false)
+    }
   }
 
   // 点击预览元素 → 在代码框里定位并选中对应的样式规则
   const handlePreviewPick = (e: ReactMouseEvent) => {
-    const editor = codeRef.current
     const root = cardRef.current
-    if (!selectedCustom || !editor || !root) return
+    if (!selectedCustom || !root) return
 
     let node: HTMLElement | null = e.target as HTMLElement
     let cls: string | null = null
@@ -309,21 +323,13 @@ export function SharePosterModal({ session, messages, myAvatarUrl, onClose, show
       candidates.push(`.${cls}`)
     }
 
-    const range = findRuleRange(editorCss, candidates)
+    const range = findRuleRange(selectedCustom.css, candidates)
     if (!range) {
       showTopToast('代码里还没有这部分的样式规则', false)
       return
     }
 
-    setHlRange(range)
-
-    const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 16
-    const line = editorCss.slice(0, range[0]).split('\n').length - 1
-    const top = Math.max(0, line * lineHeight - editor.clientHeight / 3)
-    editor.focus()
-    editor.setSelectionRange(range[0], range[0])
-    editor.scrollTop = top
-    if (hlRef.current) hlRef.current.scrollTop = top
+    void openStyleWorkbench(range)
   }
 
   const handleSave = async () => {
@@ -418,57 +424,29 @@ export function SharePosterModal({ session, messages, myAvatarUrl, onClose, show
               </div>
             </div>
 
-            {selectedCustom && (
-            <div className="poster-panel__section poster-panel__section--fill">
-              <div className="poster-panel__label">自定义样式</div>
-              <div className="poster-ai-panel">
-                  <div className="poster-css-editor">
-                    <div className="poster-css-editor__head">
-                      <span className="poster-css-editor__label">样式代码 · 可手动微调</span>
-                      <button
-                        type="button"
-                        className="poster-btn poster-btn--mini"
-                        onClick={handleSaveCss}
-                        disabled={!cssDirty}
-                      >
-                        保存修改
-                      </button>
-                    </div>
-                    <div className="poster-css-editor__field">
-                      <div className="poster-css-editor__highlight" ref={hlRef} aria-hidden="true">
-                        {hlRange && hlRange[1] <= editorCss.length && (
-                          <>
-                            {editorCss.slice(0, hlRange[0])}
-                            <mark>{editorCss.slice(hlRange[0], hlRange[1])}</mark>
-                            {editorCss.slice(hlRange[1])}
-                          </>
-                        )}
-                      </div>
-                      <textarea
-                        ref={codeRef}
-                        className="poster-ai-input poster-css-editor__code"
-                        value={editorCss}
-                        onChange={(e) => {
-                          setCssDraft({ id: selectedCustom.id, css: e.target.value })
-                          setHlRange(null)
-                        }}
-                        onScroll={(e) => {
-                          const hl = hlRef.current
-                          if (hl) {
-                            hl.scrollTop = e.currentTarget.scrollTop
-                            hl.scrollLeft = e.currentTarget.scrollLeft
-                          }
-                        }}
-                        spellCheck={false}
-                      />
-                    </div>
-                    <p className="poster-css-editor__tip">
-                      改完点「保存修改」生效。仅配色类属性有效，排版/尺寸属性会被自动忽略。
-                    </p>
+            <div className="poster-panel__section">
+              <div className="poster-panel__label">样式工作台</div>
+              <div className="poster-style-entry">
+                <div className="poster-style-entry__info">
+                  <div className="poster-style-entry__name">
+                    {selectedCustom ? selectedCustom.name : 'Agent 自定义样式'}
                   </div>
+                  <div className="poster-style-entry__meta">
+                    {selectedCustom
+                      ? '当前自定义样式已选中'
+                      : '生成新样式，或编辑已有自定义主题'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="poster-btn poster-btn--primary poster-style-entry__btn"
+                  onClick={() => void openStyleWorkbench()}
+                >
+                  <Code2 size={14} />
+                  打开
+                </button>
               </div>
             </div>
-            )}
           </div>
 
           <div className="poster-panel__actions">
@@ -536,6 +514,7 @@ export function SharePosterModal({ session, messages, myAvatarUrl, onClose, show
             </div>
           </div>
         </main>
+
       </div>
     </div>
   )

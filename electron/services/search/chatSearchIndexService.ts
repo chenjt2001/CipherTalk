@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { chatService, type Message } from '../chatService'
 import { ConfigService } from '../config'
@@ -386,11 +386,36 @@ export class ChatSearchIndexService {
       }
     }
 
-    const db = new Database(nextDbPath)
+    let db = new Database(nextDbPath)
+    try {
+      this.ensureSchema(db)
+    } catch (e) {
+      try { db.close() } catch { /* ignore */ }
+      if (!this.isMissingVec0ModuleError(e)) throw e
+      // 旧版本曾在本索引库建 sqlite-vec 的 message_embedding_vec(vec0) 虚表。新版不再加载该原生扩展，
+      // 而 DROP 这张虚表需调用 vec0 模块析构，模块缺失会抛 "no such module: vec0"，导致整个索引库
+      // 打不开（连带依赖它的数字分身构建直接报错）。索引库是可从微信库重建的派生缓存，直接删库重建。
+      this.removeSqliteFileSet(nextDbPath)
+      db = new Database(nextDbPath)
+      this.ensureSchema(db)
+    }
     this.db = db
     this.dbPath = nextDbPath
-    this.ensureSchema(db)
     return db
+  }
+
+  private isMissingVec0ModuleError(error: unknown): boolean {
+    return /no such module:\s*vec0/i.test(error instanceof Error ? error.message : String(error))
+  }
+
+  private removeSqliteFileSet(dbPath: string): void {
+    for (const filePath of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]) {
+      try {
+        if (existsSync(filePath)) rmSync(filePath, { force: true })
+      } catch {
+        // best-effort 清理，删不掉也不阻塞重建
+      }
+    }
   }
 
   close(): void {

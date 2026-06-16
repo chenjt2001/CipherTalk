@@ -39,6 +39,7 @@ export interface WindowManager {
   openBrowserWindow(url: string, title?: string): BrowserWindow
   openChatHistoryWindow(sessionId: string, messageId: number): BrowserWindow
   openPersonaChatWindow(sessionId: string): BrowserWindow
+  openPosterStyleWindow(): BrowserWindow
   completeWelcome(): boolean
   isChatWindowOpen(): boolean
   closeChatWindow(): boolean

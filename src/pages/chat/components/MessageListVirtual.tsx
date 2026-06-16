@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import type { RefObject } from 'react'
-import { Check, ChevronDown, Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2 } from 'lucide-react'
 import { Button } from '@heroui/react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import ChatBackground from '../../../components/ChatBackground'
@@ -137,11 +137,6 @@ export function MessageListVirtual({
         data-message-key={messageDomKey}
         onClick={isSelectable ? () => onToggleSelect(msg.localId) : undefined}
       >
-        {isSelectable && (
-          <div className={`select-checkbox${isSelected ? ' checked' : ''}`}>
-            {isSelected && <Check size={13} strokeWidth={3} />}
-          </div>
-        )}
         {showDateDivider && (
           <div className="date-divider">
             <span>{formatDateDivider(msg.createTime)}</span>
@@ -155,6 +150,7 @@ export function MessageListVirtual({
           isGroupChat={isGroupChat(currentSession.username)}
           hasImageKey={hasImageKey === true}
           quoteStyle={quoteStyle}
+          selectMode={isSelectable}
           onContextMenu={(e, message, handlers) => {
             if (message.localType === 10000) {
               return
@@ -163,37 +159,9 @@ export function MessageListVirtual({
             e.preventDefault()
             e.stopPropagation()
 
-            const menuWidth = 160
-            let menuItemCount = 1
-            if (message.localType !== 34 && message.localType !== 3 && message.localType !== 43) {
-              menuItemCount += 2
-            }
-            if (message.localType !== 3 && message.localType !== 43) {
-              menuItemCount += 1
-            }
-            if (message.localType === 34) {
-              menuItemCount += 1
-            }
-            if (handlers?.reTranscribe) {
-              menuItemCount += 1
-            }
-            if (handlers?.editStt) {
-              menuItemCount += 1
-            }
-            const menuHeight = menuItemCount * 38 + 12
-            let x = e.clientX
-            let y = e.clientY
-
-            if (x + menuWidth > window.innerWidth) {
-              x = window.innerWidth - menuWidth - 10
-            }
-            if (y + menuHeight > window.innerHeight) {
-              y = window.innerHeight - menuHeight - 10
-            }
-
             setContextMenu({
-              x,
-              y,
+              x: e.clientX,
+              y: e.clientY,
               message,
               session: currentSession,
               handlers

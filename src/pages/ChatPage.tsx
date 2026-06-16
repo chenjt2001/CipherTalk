@@ -6,7 +6,7 @@ import './chat/styles/_message-media.scss'
 import './chat/styles/message-cards.css'
 import './chat/styles/_detail-panel.scss'
 import './chat/styles/overlays.css'
-import './chat/styles/_share-poster.scss'
+import './chat/styles/_share-poster.css'
 import ChatPage from './chat/ChatPage'
 
 export default ChatPage

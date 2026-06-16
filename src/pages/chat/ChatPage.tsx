@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { MessageSquare } from 'lucide-react'
+import { Button } from '@heroui/react'
+import { ImagePlus, MessageSquare, X } from 'lucide-react'
 import { useChatStore, MAX_ACTIVE_MESSAGES } from '../../stores/chatStore'
 import { useUpdateStatusStore } from '../../stores/updateStatusStore'
 import ChatBackground from '../../components/ChatBackground'
@@ -12,7 +13,6 @@ import { BatchTranscribeModal } from './components/BatchTranscribeModal'
 import { ChatHeader } from './components/ChatHeader'
 import { MessageListVirtual } from './components/MessageListVirtual'
 import { SessionSidebar } from './components/SessionSidebar'
-import { SharePosterModal } from './components/SharePosterModal'
 import { ContextMenuPortal } from './components/portals/ContextMenuPortal'
 import { EnlargeViewModal } from './components/portals/EnlargeViewModal'
 import { MessageInfoModal } from './components/portals/MessageInfoModal'
@@ -192,13 +192,10 @@ function ChatPage(_props: ChatPageProps) {
   const {
     contextMenu,
     setContextMenu,
-    isMenuClosing,
-    setIsMenuClosing,
     closeContextMenu
   } = useContextMenuState()
   const [selectedMessages, setSelectedMessages] = useState<Set<number>>(new Set())
   const [selectMode, setSelectMode] = useState(false)
-  const [showPoster, setShowPoster] = useState(false)
   const [showEnlargeView, setShowEnlargeView] = useState<{ message: Message; content: string } | null>(null)
   const { showTopToast } = useTopToast()
   const [showMessageInfo, setShowMessageInfo] = useState<Message | null>(null) // 消息信息弹窗
@@ -253,7 +250,6 @@ function ChatPage(_props: ChatPageProps) {
 
   const exitSelectMode = useCallback(() => {
     setSelectMode(false)
-    setShowPoster(false)
     setSelectedMessages(new Set())
   }, [])
 
@@ -269,7 +265,6 @@ function ChatPage(_props: ChatPageProps) {
   // 切换会话时退出多选模式
   useEffect(() => {
     setSelectMode(false)
-    setShowPoster(false)
     setSelectedMessages(new Set())
   }, [currentSessionId])
 
@@ -277,6 +272,33 @@ function ChatPage(_props: ChatPageProps) {
     () => messages.filter(m => selectedMessages.has(m.localId)),
     [messages, selectedMessages]
   )
+
+  const openPosterWindow = useCallback(async () => {
+    const session = sessions.find(s => s.username === currentSessionId)
+    if (!session) {
+      showTopToast('当前会话不存在', false)
+      return
+    }
+    if (posterMessages.length === 0) {
+      showTopToast('请先选择消息', false)
+      return
+    }
+    try {
+      const savedThemeId = await window.electronAPI.config.get('posterThemeId')
+      await window.electronAPI.config.set('posterStyleWindowContext', {
+        session,
+        messages: posterMessages,
+        myAvatarUrl,
+        themeId: typeof savedThemeId === 'string' ? savedThemeId : '',
+        updatedAt: Date.now()
+      })
+      await window.electronAPI.window.openPosterStyleWindow()
+      exitSelectMode()
+    } catch (error) {
+      console.error('[ChatPage] 打开海报窗口失败', error)
+      showTopToast('打开海报窗口失败', false)
+    }
+  }, [currentSessionId, exitSelectMode, myAvatarUrl, posterMessages, sessions, showTopToast])
 
   const exportVoiceMessage = useCallback(async (message: Message, session: ChatSession) => {
     try {
@@ -1702,21 +1724,25 @@ function ChatPage(_props: ChatPageProps) {
                 <div className="select-action-bar">
                   <span className="select-action-bar__count">已选 {selectedMessages.size} 条</span>
                   <div className="select-action-bar__btns">
-                    <button
-                      type="button"
+                    <Button
                       className="select-action-bar__btn"
-                      onClick={exitSelectMode}
+                      size="sm"
+                      variant="tertiary"
+                      onPress={exitSelectMode}
                     >
+                      <X className="size-4 shrink-0" />
                       取消
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
                       className="select-action-bar__btn select-action-bar__btn--primary"
-                      disabled={selectedMessages.size === 0}
-                      onClick={() => setShowPoster(true)}
+                      isDisabled={selectedMessages.size === 0}
+                      size="sm"
+                      variant="primary"
+                      onPress={() => void openPosterWindow()}
                     >
+                      <ImagePlus className="size-4 shrink-0" />
                       生成海报
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -1744,10 +1770,7 @@ function ChatPage(_props: ChatPageProps) {
 
       <ContextMenuPortal
         contextMenu={contextMenu}
-        isMenuClosing={isMenuClosing}
-        closeContextMenu={closeContextMenu}
         setContextMenu={setContextMenu}
-        setIsMenuClosing={setIsMenuClosing}
         showTopToast={showTopToast}
         setShowEnlargeView={setShowEnlargeView}
         onEnterSelectMode={enterSelectMode}
@@ -1800,15 +1823,6 @@ function ChatPage(_props: ChatPageProps) {
         imageMessages={batchImageMessages}
       />
 
-      {showPoster && currentSession && (
-        <SharePosterModal
-          session={currentSession}
-          messages={posterMessages}
-          myAvatarUrl={myAvatarUrl}
-          onClose={() => setShowPoster(false)}
-          showTopToast={showTopToast}
-        />
-      )}
     </div>
   )
 }

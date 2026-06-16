@@ -3,17 +3,14 @@ import type { ContextMenuState } from '../types'
 
 export function useContextMenuState() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
-  const [isMenuClosing, setIsMenuClosing] = useState(false)
 
   const closeContextMenu = useCallback(() => {
-    setIsMenuClosing(true)
+    setContextMenu(null)
   }, [])
 
   return {
     contextMenu,
     setContextMenu,
-    isMenuClosing,
-    setIsMenuClosing,
     closeContextMenu
   }
 }

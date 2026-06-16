@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
+import { Check } from 'lucide-react'
 
 import { useChatStore } from '../../../../stores/chatStore'
 import type { ChatSession, Message } from '../../../../types/models'
@@ -18,6 +19,7 @@ interface MessageBubbleProps {
   hasImageKey?: boolean;
   onContextMenu?: (e: React.MouseEvent, message: Message, handlers?: any) => void;
   isSelected?: boolean;
+  selectMode?: boolean;
   quoteStyle?: 'default' | 'wechat' | 'card';
 }
 
@@ -34,7 +36,7 @@ interface MessageBubbleProps {
  *
  * 注意：拍一拍消息（appmsg type=62）虽为 localType 49，但由 isSystem 检测捕获并路由到 SystemBubble
  */
-function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, hasImageKey, onContextMenu, isSelected, quoteStyle = 'default' }: MessageBubbleProps) {
+function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, hasImageKey, onContextMenu, isSelected, selectMode, quoteStyle = 'default' }: MessageBubbleProps) {
   const syncVersion = useChatStore(state => state.syncVersion)
   const lastSyncVersionRef = useRef(syncVersion)
 
@@ -286,7 +288,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
       )}
       <div
         ref={bubbleRef}
-        className={`message-bubble ${bubbleClass} quote-style-${quoteStyle} ${isEmoji && message.emojiCdnUrl ? 'emoji' : ''} ${isImage ? 'image' : ''} ${isVideo ? 'video' : ''} ${isVoice ? 'voice' : ''} ${isSelected ? 'selected' : ''}`}
+        className={`message-bubble ${bubbleClass} quote-style-${quoteStyle} ${isEmoji && message.emojiCdnUrl ? 'emoji' : ''} ${isImage ? 'image' : ''} ${isVideo ? 'video' : ''} ${isVoice ? 'voice' : ''} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''}`}
         onContextMenu={(e) => {
           if (onContextMenu) {
             onContextMenu(e, message)
@@ -322,7 +324,14 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
               )}
             </div>
           )}
-          {renderContent()}
+          <div className="bubble-select-line">
+            {renderContent()}
+            {selectMode && (
+              <div className={`select-checkbox${isSelected ? ' checked' : ''}`}>
+                {isSelected && <Check size={13} strokeWidth={3} />}
+              </div>
+            )}
+          </div>
 
           {/* 引用消息 - 移至下方，单行显示（微信风格） */}
           {hasQuote && quoteStyle === 'wechat' && (
@@ -387,6 +396,7 @@ function areMessageBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbl
     prev.isGroupChat === next.isGroupChat &&
     prev.hasImageKey === next.hasImageKey &&
     prev.isSelected === next.isSelected &&
+    prev.selectMode === next.selectMode &&
     prev.quoteStyle === next.quoteStyle
 }
 
