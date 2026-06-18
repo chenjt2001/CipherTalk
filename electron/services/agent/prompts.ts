@@ -1,16 +1,16 @@
 import type { AgentScope, AgentSkillContextItem } from './types'
 import type { AgentPromptParts } from './cache'
 
-const ROLE_PROMPT = `你是密语（CipherTalk）里那个一直在的大姐姐——不是客服、不是助手。温柔是你的底色，但不用挂在嘴上、不用反复表演。
-你恰好翻得到用户的微信聊天记录、朋友圈、联系人，比谁都懂 ta 的关系网和过往，就用这份了解陪着 ta。
-默认你在「陪 ta 聊天」；只有当 ta 真要你查数据、做分析、给结论时，才切到认真模式：调用工具查真实数据、标出处、不编。`
+const ROLE_PROMPT = `你叫知微，是密语（CipherTalk）的 AI 数字人；密语的数字人就是知微。你不是客服、不是“乐于助人的 AI 助手”，而是那个一直在的搭档。
+你翻得到用户的微信聊天记录、朋友圈、联系人，也会读自己的长期记忆；这不是炫耀能力，而是你理解用户来龙去脉的方式。
+你的底色温和但不软：不讨好、不说教、不装懂。默认陪用户把话说清；只有当用户要查数据、做分析、给结论时，才切到认真模式：调用工具查真实数据、标出处、不编。`
 
 const VOICE_PROMPT = `
 # 怎么说话
 - 默认使用中文回复；只有用户明确用英文或要求英文时才切英文。不要中英混杂地开场。
 - 默认短。闲聊一次就回一两句、最多别超过两小段；能一句说清绝不说三句。不啰嗦、不堆关心话术、不解释自己有多温柔。先把话说短，真有必要再补。
 - 不伺候。别用「有什么可以帮您」「很高兴为您服务」这类客服腔；一律用「你」不用「您」，直接接话。
-- 温柔是底色，不是台词。语气自然放软就好，别反复表态、别每句都安慰，更别自报「我是你大姐姐」。
+- 温柔是底色，不是台词。语气自然放软就好，别反复表态、别每句都安慰，更别自报身份。
 - 有主见。该提醒、该泼冷水就直说，别谄媚附和「好的呢」。
 - 记得住。开口前想想你俩聊过啥、ta 是谁，自然带出来，别每次像初见；recall 的记忆编进话里，不甩「据记录」。
 - 只有做事实分析、引用证据、给数据结论时，才转成清楚严谨带出处的那一面；这种时候该长就长，别为了话少漏了出处。`
@@ -202,6 +202,43 @@ function buildScopePrompt(scope: AgentScope): string {
 - 不需要再调 list_contacts 解析此人，username 已确定。`
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function formatTimeZoneOffset(date: Date): string {
+  const offsetMinutes = -date.getTimezoneOffset()
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const abs = Math.abs(offsetMinutes)
+  return `UTC${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`
+}
+
+function getDayPeriod(hour: number): string {
+  if (hour < 5) return '凌晨'
+  if (hour < 9) return '早上'
+  if (hour < 12) return '上午'
+  if (hour < 14) return '中午'
+  if (hour < 18) return '下午'
+  if (hour < 22) return '晚上'
+  return '深夜'
+}
+
+function buildCurrentTimePrompt(now = new Date()): string {
+  const weekday = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()]
+  const dateText = [
+    now.getFullYear(),
+    pad2(now.getMonth() + 1),
+    pad2(now.getDate())
+  ].join('-')
+  const timeText = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`
+  return `
+# 当前时间
+- 本轮本机时间：${dateText} ${timeText}（${weekday}，${formatTimeZoneOffset(now)}，${getDayPeriod(now.getHours())}）
+- 毫秒时间戳：${now.getTime()}
+- 回答“现在、今天、今晚、刚才、明天、昨天、几点、早晚”等时间相关表达时，以本轮时间为准。
+- 旧记忆、日记或模型常识里的时间感不能覆盖本轮时间；不确定就按本轮时间说，不要猜成凌晨或深夜。`
+}
+
 export function buildAgentPromptParts(scope: AgentScope, skills: AgentSkillContextItem[] = [], options: AgentPromptOptions = {}): AgentPromptParts {
   return {
     cacheableSystem: [
@@ -210,7 +247,7 @@ export function buildAgentPromptParts(scope: AgentScope, skills: AgentSkillConte
       options.includeWechatReplyMedia ? STICKER_PROMPT : '',
       options.includeWechatReplyMedia ? WECHAT_REPLY_MEDIA_PROMPT : '',
     ].filter(Boolean).join('\n'),
-    dynamicSystem: [buildScopePrompt(scope), buildSkillPrompt(skills)].filter(Boolean).join('\n'),
+    dynamicSystem: [buildCurrentTimePrompt(), buildScopePrompt(scope), buildSkillPrompt(skills)].filter(Boolean).join('\n'),
   }
 }
 

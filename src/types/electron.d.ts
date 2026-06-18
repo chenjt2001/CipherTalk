@@ -281,6 +281,19 @@ export interface MemoryDiaryEntryInfo {
   updatedAt: number
 }
 
+export type MemoryBankNoteKind = 'tasks' | 'notes'
+
+export interface MemoryBankNoteInfo {
+  kind: MemoryBankNoteKind
+  fileName: string
+  title: string
+  excerpt: string
+  content?: string
+  status?: string
+  tags: string[]
+  updatedAt: number
+}
+
 // 克隆好友（数字分身）：画像卡 + few-shot + 风格统计（与 electron/services/agent/persona/personaTypes.ts 对应）
 export interface PersonaCardInfo {
   tone: string
@@ -1342,6 +1355,9 @@ export interface ElectronAPI {
     migrateLegacy: () => Promise<{ success: boolean; result?: MemoryMigrationResultInfo; error?: string }>
     list: (opts?: { sourceType?: AgentMemorySourceType; sourceTypes?: AgentMemorySourceType[]; sessionId?: string; tags?: string[]; withoutTags?: string[]; minConfidence?: number; limit?: number }) => Promise<{ success: boolean; items?: AgentMemoryItem[]; stats?: { itemCount: number }; error?: string }>
     listDiaries: (limit?: number) => Promise<{ success: boolean; diaries?: MemoryDiaryEntryInfo[]; error?: string }>
+    listBankNotes: (kind: MemoryBankNoteKind, limit?: number) => Promise<{ success: boolean; notes?: MemoryBankNoteInfo[]; error?: string }>
+    readBankNote: (kind: MemoryBankNoteKind, fileName: string) => Promise<{ success: boolean; note?: MemoryBankNoteInfo; error?: string }>
+    deleteBankNote: (kind: MemoryBankNoteKind, fileName: string) => Promise<{ success: boolean; error?: string }>
     readDiary: (date: string) => Promise<{ success: boolean; diary?: MemoryDiaryEntryInfo; error?: string }>
     deleteDiary: (date: string) => Promise<{ success: boolean; error?: string }>
     summarizeTodayDiary: () => Promise<{ success: boolean; alreadyExists?: boolean; diary?: MemoryDiaryEntryInfo; error?: string }>

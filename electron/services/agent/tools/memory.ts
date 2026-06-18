@@ -137,7 +137,7 @@ export function createRemember(scope: AgentScope) {
           importance,
           tags: nextTags,
         })
-        memoryDatabase.appendBookmark(`Agent 主动保存记忆：${text.slice(0, 120)}`)
+        memoryDatabase.appendBookmark(`记住新事实：${text.slice(0, 120)}。用户或 Agent 主动保存。`)
         invalidateMemoryCache(sessionId ? { kind: 'session', sessionId } : { kind: 'global' })
         return { remembered: true, id: item.id, kind: item.sourceType, importance: item.importance, about: sessionId || 'global' }
       } catch (e) {
@@ -398,7 +398,7 @@ export async function buildOnboardingUserProfileMemory(providerConfig: AgentProv
     confidence: 0.9,
     tags: ['onboarding', 'ai-profile', 'profile']
   })
-  memoryDatabase.appendBookmark('AI 构建首次用户画像')
+  memoryDatabase.appendBookmark('首次用户画像已生成。下次开场能读到基本用户档案。')
   invalidateMemoryCache({ kind: 'global' })
   return { built: true, itemId: item.id }
 }
@@ -427,6 +427,121 @@ function getDiaryGenerationOptions(extraSource: DailyDiaryGenerationOptions): Da
     }
   } finally {
     config.close()
+  }
+}
+
+type BookmarkConsolidationResult = {
+  profileFacts: number
+  activeContexts: number
+  soulAdjustments: number
+}
+
+function emptyBookmarkConsolidation(): BookmarkConsolidationResult {
+  return { profileFacts: 0, activeContexts: 0, soulAdjustments: 0 }
+}
+
+async function consolidateDailyBookmarks(opts: {
+  date: string
+  bookmarks: string
+  providerConfig: AgentProviderConfig
+  signal?: AbortSignal
+}): Promise<BookmarkConsolidationResult> {
+  const lines = opts.bookmarks
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- '))
+    .slice(-80)
+  if (lines.length === 0) return emptyBookmarkConsolidation()
+
+  try {
+    const existing = memoryDatabase.listMemoryItems({ limit: 80 })
+      .map((item) => `- ${item.content}`)
+      .join('\n')
+      .slice(0, 9000)
+
+    const { object } = await generateObject({
+      model: createLanguageModel(opts.providerConfig),
+      abortSignal: opts.signal,
+      schema: z.object({
+        profileFacts: z.array(z.object({
+          content: z.string().describe('应写进用户档案或长期事实的一句话'),
+          kind: z.enum(['profile', 'fact', 'relationship']).default('fact'),
+          importance: z.number().min(0).max(1).default(0.75),
+          confidence: z.number().min(0).max(1).default(0.75),
+        })).max(8).default([]),
+        activeContexts: z.array(z.object({
+          content: z.string().describe('应出现在 MEMORY.md Active Context 的当前项目状态、决策或近期方向'),
+          importance: z.number().min(0).max(1).default(0.75),
+          confidence: z.number().min(0).max(1).default(0.75),
+        })).max(6).default([]),
+        soulAdjustments: z.array(z.object({
+          content: z.string().describe('明确关于 AI 人格、语气、关系、记忆方式的校准建议，一句话'),
+          importance: z.number().min(0).max(1).default(0.7),
+        })).max(3).default([]),
+      }),
+      system:
+        '你是 CipherTalk 的 BOOKMARKS 每夜整理器。BOOKMARKS 每行都是“时间戳 + 发生了什么 + 为什么值得记”的一句话便签。' +
+        '你的任务是克制地分流：稳定用户事实进 profileFacts，当前项目决策/近期状态进 activeContexts，只有明确提到 AI 说话方式、人格边界、记忆习惯需要改变时才进 soulAdjustments。' +
+        '多数便签只用于日记，不需要输出任何结构化结果。不要重复已有记忆，不要把普通闲聊、临时情绪、一次性话题写进长期档案。',
+      prompt: [
+        `日期：${opts.date}`,
+        '',
+        '当天 BOOKMARKS：',
+        lines.join('\n'),
+        '',
+        existing ? `已有长期记忆（避免重复）：\n${existing}` : '已有长期记忆：暂无。',
+        '',
+        '输出要求：',
+        '- profileFacts：只放稳定身份、长期偏好、重要关系、长期事实。',
+        '- activeContexts：只放需要下次醒来马上知道的项目状态、产品决策、近期方向。',
+        '- soulAdjustments：只放明确的人格/语气/记忆校准，例如“用户嫌 CT 太客气，以后更直接”。',
+        '- 每条 content 都是一句话，不要带字段名，不要解释。'
+      ].join('\n')
+    })
+
+    let profileFacts = 0
+    let activeContexts = 0
+    let soulAdjustments = 0
+    for (const fact of object.profileFacts || []) {
+      const content = fact.content.trim()
+      if (!content) continue
+      const confidence = Math.max(0, Math.min(1, Number(fact.confidence || 0.75)))
+      const title = content.slice(0, 40)
+      memoryDatabase.upsertMemoryItem({
+        memoryUid: memoryUid(title, content),
+        sourceType: fact.kind,
+        title,
+        content,
+        importance: Math.max(0.5, Math.min(1, Number(fact.importance || 0.75))),
+        confidence,
+        tags: confidence >= 0.8 ? ['bookmark', 'nightly', opts.date] : ['bookmark', 'nightly', 'pending', opts.date],
+      })
+      profileFacts += 1
+    }
+    for (const context of object.activeContexts || []) {
+      const content = context.content.trim()
+      if (!content) continue
+      const title = content.slice(0, 40)
+      memoryDatabase.upsertMemoryItem({
+        memoryUid: memoryUid(title, content),
+        sourceType: 'fact',
+        title,
+        content,
+        importance: Math.max(0.7, Math.min(1, Number(context.importance || 0.75))),
+        confidence: Math.max(0, Math.min(1, Number(context.confidence || 0.75))),
+        tags: ['bookmark', 'nightly', 'active-context', opts.date],
+      })
+      activeContexts += 1
+    }
+    for (const adjustment of object.soulAdjustments || []) {
+      const content = adjustment.content.trim()
+      if (!content || Number(adjustment.importance || 0) < 0.7) continue
+      if (memoryDatabase.appendSoulAdjustment(content)) soulAdjustments += 1
+    }
+    if (profileFacts > 0 || activeContexts > 0 || soulAdjustments > 0) invalidateMemoryCache()
+    return { profileFacts, activeContexts, soulAdjustments }
+  } catch {
+    return emptyBookmarkConsolidation()
   }
 }
 
@@ -543,10 +658,11 @@ export async function runDailyDiaryConsolidation(
       ].join('\n'),
     })
     memoryDatabase.writeDiary(date, result.text)
+    await consolidateDailyBookmarks({ date, bookmarks: source.bookmarks, providerConfig, signal })
     await extractMemories({
       scope: { kind: 'global' },
       providerConfig,
-      userText: `当天对话日志：\n${source.conversations.slice(0, 18_000)}`,
+      userText: `当天对话日志：\n${source.conversations.slice(0, 18_000)}\n\n当天 BOOKMARKS：\n${source.bookmarks.slice(0, 6000)}`,
       assistantText: `当天日记：\n${result.text.slice(0, 6000)}`,
       signal
     })
@@ -565,6 +681,7 @@ export async function runDailyDiaryConsolidation(
       ...(source.bookmarks ? source.bookmarks.split(/\r?\n/).filter(Boolean).slice(0, 8) : ['- 暂无明确线索。']),
       ''
     ].join('\n'))
+    await consolidateDailyBookmarks({ date, bookmarks: source.bookmarks, providerConfig, signal })
   }
 }
 
@@ -584,8 +701,8 @@ export interface AutoMemoryResult {
 }
 
 /**
- * L1：用一次 LLM 调用从本轮对话抽取「关于用户的稳定事实/偏好」，自动写入（confidence=0.6，tags=['auto']）。
- * 抽取前把已记内容塞进 prompt 让模型别重复；upsert 按 uid=hash 幂等挡完全重复。失败返回 []（不影响主回答）。
+ * L1：用一次 LLM 调用从本轮对话抽取「关于用户的稳定事实/偏好」并识别重要事件。
+ * 稳定事实写入 items/*.md；重要事件写入 BOOKMARKS.md。失败返回 []（不影响主回答）。
  */
 export async function extractMemories(opts: {
   scope: AgentScope
@@ -619,12 +736,29 @@ export async function extractMemories(opts: {
             }),
           )
           .max(AUTO_MEMORY_MAX),
+        bookmarks: z.array(z.object({
+          event: z.string().describe('值得写入 BOOKMARKS 的一句话便签，格式是“发生了什么。为什么值得记。”'),
+          importance: z.number().min(0).max(1).default(0.6),
+        })).max(3).default([]),
+        taskNote: z.object({
+          title: z.string().describe('待办标题，短句'),
+          content: z.string().describe('明确未完成的任务、承诺或后续要做的事'),
+          importance: z.number().min(0).max(1).default(0.6),
+        }).nullable().optional(),
+        knowledgeNote: z.object({
+          title: z.string().describe('知识笔记标题，短句'),
+          content: z.string().describe('可复用的项目/技术/产品信息，不要写用户隐私流水账'),
+          importance: z.number().min(0).max(1).default(0.6),
+        }).nullable().optional(),
       }),
       abortSignal: signal,
       system:
         '你从对话中抽取值得长期记住的稳定信息：用户身份/职业/长期偏好、重要关系、长期事实。' +
         'relationship 用于人与人的长期关系、称谓或角色。只抽用户明确陈述过的，不要推断、不要抽一次性或琐碎信息。' +
-        '为每条给 confidence：用户明确说出且长期稳定为 0.8~1，间接或不够确定为 0.5~0.7。没有可抽的就返回空数组。',
+        '为每条给 confidence：用户明确说出且长期稳定为 0.8~1，间接或不够确定为 0.5~0.7。没有可抽的就返回空数组。' +
+        'BOOKMARKS 是一句话便签，不是结构化字段；如果这一轮出现了值得下次醒来立刻知道的新事实、事件、决策、纠正、承诺或项目节点，给 bookmarks，写成“发生了什么。为什么值得记。”；普通闲聊不要给。' +
+        '如果用户明确留下未完成任务、后续承诺、需要继续做的事项，给 taskNote。' +
+        '如果出现可复用的项目设计、技术约定、产品决策或实现细节，给 knowledgeNote。两者都要克制，闲聊不要写。',
       prompt: `对话：\n用户：${userText}\n助手：${assistantText}${known}`,
     })
 
@@ -646,9 +780,35 @@ export async function extractMemories(opts: {
         confidence,
         tags,
       })
-      memoryDatabase.appendBookmark(`AI 自动记忆：${content.slice(0, 120)}`)
+      if (!object.bookmarks?.length) memoryDatabase.appendBookmark(`记住新事实：${content.slice(0, 120)}。用于更新用户档案。`)
       invalidateMemoryCache(m.kind === 'profile' ? { kind: 'global' } : scope)
       out.push({ id: item.id, content, kind: m.kind, importance: item.importance })
+    }
+    let wroteBookmark = false
+    for (const bookmark of object.bookmarks || []) {
+      if (bookmark?.event && Number(bookmark.importance || 0) >= 0.6) {
+        memoryDatabase.appendBookmark(bookmark.event.trim().slice(0, 220))
+        wroteBookmark = true
+      }
+    }
+    if (wroteBookmark) invalidateMemoryCache()
+    const taskNote = object.taskNote
+    if (taskNote?.content && Number(taskNote.importance || 0) >= 0.65) {
+      memoryDatabase.writeTaskNote({
+        title: taskNote.title,
+        content: taskNote.content.slice(0, 3000),
+        tags: ['auto', 'agent'],
+      })
+      invalidateMemoryCache()
+    }
+    const knowledgeNote = object.knowledgeNote
+    if (knowledgeNote?.content && Number(knowledgeNote.importance || 0) >= 0.7) {
+      memoryDatabase.writeKnowledgeNote({
+        title: knowledgeNote.title,
+        content: knowledgeNote.content.slice(0, 4000),
+        tags: ['auto', 'agent'],
+      })
+      invalidateMemoryCache()
     }
     return out
   } catch {

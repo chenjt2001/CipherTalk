@@ -885,6 +885,41 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
+  ipcMain.handle('memory:listBankNotes', async (_event, kind: string, limit?: number) => {
+    try {
+      const safeKind = kind === 'tasks' ? 'tasks' : kind === 'notes' ? 'notes' : null
+      if (!safeKind) return { success: false, error: '无效的笔记类型' }
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      return { success: true, notes: memoryDatabase.listBankNotes(safeKind, limit) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('memory:readBankNote', async (_event, kind: string, fileName: string) => {
+    try {
+      const safeKind = kind === 'tasks' ? 'tasks' : kind === 'notes' ? 'notes' : null
+      if (!safeKind) return { success: false, error: '无效的笔记类型' }
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      const note = memoryDatabase.readBankNote(safeKind, String(fileName || ''))
+      return note ? { success: true, note } : { success: false, error: '未找到该笔记' }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('memory:deleteBankNote', async (_event, kind: string, fileName: string) => {
+    try {
+      const safeKind = kind === 'tasks' ? 'tasks' : kind === 'notes' ? 'notes' : null
+      if (!safeKind) return { success: false, error: '无效的笔记类型' }
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      const deleted = memoryDatabase.deleteBankNote(safeKind, String(fileName || ''))
+      return deleted ? { success: true } : { success: false, error: '未找到该笔记' }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   ipcMain.handle('memory:readDiary', async (_event, date: string) => {
     try {
       const { memoryDatabase } = await import('../../services/memory/memoryDatabase')

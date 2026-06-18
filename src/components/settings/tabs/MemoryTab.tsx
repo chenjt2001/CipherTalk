@@ -16,8 +16,8 @@ import {
   Typography,
   type Key,
 } from '@heroui/react'
-import { Check, Download, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
-import type { AgentMemoryItem, AgentMemorySourceType } from '../../../types/electron'
+import { Check, Download, FileText, ListChecks, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
+import type { AgentMemoryItem, AgentMemorySourceType, MemoryBankNoteInfo, MemoryBankNoteKind } from '../../../types/electron'
 
 interface MemoryTabProps {
   showMessage: (text: string, success: boolean) => void
@@ -34,6 +34,7 @@ const MEMORY_SOURCE_OPTIONS: Array<{ value: AgentMemorySourceType; label: string
 ]
 
 const LOAD_LIMIT = 2000
+const BANK_NOTE_LOAD_LIMIT = 200
 
 type MemoryTypeFilter = AgentMemorySourceType | 'all'
 type MemoryStatusFilter = 'all' | 'auto' | 'pending'
@@ -111,6 +112,27 @@ function searchableText(item: AgentMemoryItem) {
   ].filter(Boolean).join('\n').toLowerCase()
 }
 
+function searchableBankNote(note: MemoryBankNoteInfo) {
+  return [
+    note.title,
+    note.excerpt,
+    note.content,
+    note.status,
+    note.tags?.join(' '),
+    note.fileName,
+  ].filter(Boolean).join('\n').toLowerCase()
+}
+
+function formatDateTime(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return ''
+  const date = new Date(value)
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function bankNoteKindLabel(kind: MemoryBankNoteKind) {
+  return kind === 'tasks' ? '任务笔记' : '知识笔记'
+}
+
 export default function MemoryTab({ showMessage }: MemoryTabProps) {
   const [items, setItems] = useState<AgentMemoryItem[]>([])
   const [count, setCount] = useState(0)
@@ -122,6 +144,10 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
   const [typeFilter, setTypeFilter] = useState<MemoryTypeFilter>('all')
   const [statusFilter, setStatusFilter] = useState<MemoryStatusFilter>('all')
   const [query, setQuery] = useState('')
+  const [bankNotes, setBankNotes] = useState<MemoryBankNoteInfo[]>([])
+  const [bankNoteKind, setBankNoteKind] = useState<MemoryBankNoteKind>('tasks')
+  const [bankNoteLoading, setBankNoteLoading] = useState(false)
+  const [bankNoteQuery, setBankNoteQuery] = useState('')
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -133,6 +159,11 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
       return true
     })
   }, [items, query, statusFilter, typeFilter])
+
+  const filteredBankNotes = useMemo(() => {
+    const normalizedQuery = bankNoteQuery.trim().toLowerCase()
+    return bankNotes.filter((note) => !normalizedQuery || searchableBankNote(note).includes(normalizedQuery))
+  }, [bankNoteQuery, bankNotes])
 
   const load = async () => {
     setLoading(true)
@@ -153,7 +184,25 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
     }
   }
 
+  const loadBankNotes = async (kind = bankNoteKind) => {
+    setBankNoteLoading(true)
+    try {
+      const res = await window.electronAPI.memory.listBankNotes(kind, BANK_NOTE_LOAD_LIMIT)
+      if (res.success) {
+        setBankNotes(res.notes || [])
+      } else {
+        showMessage(res.error || `加载${bankNoteKindLabel(kind)}失败`, false)
+      }
+    } catch {
+      showMessage(`加载${bankNoteKindLabel(kind)}失败`, false)
+    } finally {
+      setBankNoteLoading(false)
+    }
+  }
+
   useEffect(() => { void load() }, [])
+
+  useEffect(() => { void loadBankNotes(bankNoteKind) }, [bankNoteKind])
 
   const updateDraft = (patch: Partial<MemoryDraft>) => {
     setDraft((current) => current ? { ...current, ...patch } : current)
@@ -273,6 +322,16 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
       showMessage('导出失败', false)
     } finally {
       setExporting(false)
+    }
+  }
+
+  const handleDeleteBankNote = async (note: MemoryBankNoteInfo) => {
+    const res = await window.electronAPI.memory.deleteBankNote(note.kind, note.fileName)
+    if (res.success) {
+      setBankNotes((prev) => prev.filter((item) => item.fileName !== note.fileName || item.kind !== note.kind))
+      showMessage('笔记已删除', true)
+    } else {
+      showMessage(res.error || '删除笔记失败', false)
     }
   }
 
@@ -472,7 +531,68 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
     )
   }
 
+  const renderBankNoteItem = (note: MemoryBankNoteInfo) => (
+    <div className="rounded-lg border border-border bg-default p-3" key={`${note.kind}:${note.fileName}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Chip size="sm" variant="soft">{bankNoteKindLabel(note.kind)}</Chip>
+        {note.status && <Chip size="sm" variant="soft">{note.status}</Chip>}
+        <span className="text-xs text-muted">{formatDateTime(note.updatedAt)}</span>
+      </div>
+
+      <Typography.Paragraph className="mt-2 text-sm font-medium leading-6">
+        {note.title}
+      </Typography.Paragraph>
+      <Typography.Paragraph className="mt-1 whitespace-pre-wrap wrap-break-word text-sm leading-6" color="muted">
+        {note.excerpt || '暂无内容。'}
+      </Typography.Paragraph>
+
+      {note.tags.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {note.tags.map((tag) => (
+            <Chip key={tag} size="sm" variant="soft">{tag}</Chip>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-xs text-muted">{note.fileName}</span>
+        <AlertDialog>
+          <Button size="sm" type="button" variant="danger">
+            <Trash2 size={14} />
+            删除
+          </Button>
+          <AlertDialog.Backdrop>
+            <AlertDialog.Container>
+              <AlertDialog.Dialog>
+                <AlertDialog.CloseTrigger />
+                <AlertDialog.Header>
+                  <AlertDialog.Icon status="danger" />
+                  <AlertDialog.Heading>删除这篇笔记？</AlertDialog.Heading>
+                </AlertDialog.Header>
+                <AlertDialog.Body>
+                  <Typography.Paragraph size="sm">
+                    删除后，Agent 不会再从这篇 Markdown 笔记里读取上下文。此操作不可撤销。
+                  </Typography.Paragraph>
+                  <Typography.Paragraph size="sm" color="muted">
+                    {note.title}
+                  </Typography.Paragraph>
+                </AlertDialog.Body>
+                <AlertDialog.Footer>
+                  <Button slot="close" variant="tertiary">取消</Button>
+                  <Button slot="close" variant="danger" onPress={() => void handleDeleteBankNote(note)}>
+                    删除
+                  </Button>
+                </AlertDialog.Footer>
+              </AlertDialog.Dialog>
+            </AlertDialog.Container>
+          </AlertDialog.Backdrop>
+        </AlertDialog>
+      </div>
+    </div>
+  )
+
   return (
+    <div className="space-y-4">
     <Card>
       <Card.Header className="flex-col items-start gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
@@ -544,5 +664,62 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
         )}
       </Card.Content>
     </Card>
+    <Card>
+      <Card.Header className="flex-col items-start gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <Card.Title>任务与知识笔记</Card.Title>
+          <Card.Description>自动写入 memory-bank/tasks 与 memory-bank/notes 的 Markdown。</Card.Description>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Chip color="accent" size="sm" variant="soft">{bankNotes.length} 篇</Chip>
+            <Chip size="sm" variant="soft">显示 {filteredBankNotes.length}</Chip>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <ButtonGroup variant="tertiary">
+            <Button onPress={() => setBankNoteKind('tasks')} variant={bankNoteKind === 'tasks' ? 'secondary' : 'tertiary'}>
+              <ListChecks size={16} />
+              任务
+            </Button>
+            <Button onPress={() => setBankNoteKind('notes')} variant={bankNoteKind === 'notes' ? 'secondary' : 'tertiary'}>
+              <ButtonGroup.Separator />
+              <FileText size={16} />
+              笔记
+            </Button>
+          </ButtonGroup>
+          <Button isDisabled={bankNoteLoading} type="button" variant="secondary" onPress={() => void loadBankNotes()}>
+            <RefreshCw className={bankNoteLoading ? 'animate-spin' : ''} size={16} />
+            刷新
+          </Button>
+        </div>
+      </Card.Header>
+
+      <Card.Content className="space-y-4">
+        <TextField fullWidth onChange={setBankNoteQuery} value={bankNoteQuery}>
+          <Label>搜索</Label>
+          <InputGroup fullWidth variant="secondary">
+            <InputGroup.Prefix>
+              <Search size={15} />
+            </InputGroup.Prefix>
+            <InputGroup.Input placeholder="搜索标题、内容、标签或文件名" />
+          </InputGroup>
+        </TextField>
+
+        {bankNoteLoading && bankNotes.length === 0 ? (
+          <div className="space-y-3">
+            <Skeleton className="h-24 rounded-lg" />
+            <Skeleton className="h-24 rounded-lg" />
+          </div>
+        ) : filteredBankNotes.length === 0 ? (
+          <Typography.Paragraph color="muted" size="sm">
+            没有匹配的{bankNoteKindLabel(bankNoteKind)}。
+          </Typography.Paragraph>
+        ) : (
+          <div className="space-y-3">
+            {filteredBankNotes.map(renderBankNoteItem)}
+          </div>
+        )}
+      </Card.Content>
+    </Card>
+    </div>
   )
 }

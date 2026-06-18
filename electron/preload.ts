@@ -275,6 +275,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('memory:list', opts) as Promise<{ success: boolean; items?: unknown[]; stats?: { itemCount: number }; error?: string }>,
     listDiaries: (limit?: number) =>
       ipcRenderer.invoke('memory:listDiaries', limit) as Promise<{ success: boolean; diaries?: unknown[]; error?: string }>,
+    listBankNotes: (kind: 'tasks' | 'notes', limit?: number) =>
+      ipcRenderer.invoke('memory:listBankNotes', kind, limit) as Promise<{ success: boolean; notes?: unknown[]; error?: string }>,
+    readBankNote: (kind: 'tasks' | 'notes', fileName: string) =>
+      ipcRenderer.invoke('memory:readBankNote', kind, fileName) as Promise<{ success: boolean; note?: unknown; error?: string }>,
+    deleteBankNote: (kind: 'tasks' | 'notes', fileName: string) =>
+      ipcRenderer.invoke('memory:deleteBankNote', kind, fileName) as Promise<{ success: boolean; error?: string }>,
     readDiary: (date: string) =>
       ipcRenderer.invoke('memory:readDiary', date) as Promise<{ success: boolean; diary?: unknown; error?: string }>,
     deleteDiary: (date: string) =>
