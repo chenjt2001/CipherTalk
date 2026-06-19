@@ -55,7 +55,9 @@ export const SourcesContent = ({
   </Disclosure.Content>
 );
 
-export type SourceProps = ComponentProps<typeof Link>;
+export type SourceProps = ComponentProps<typeof Link> & {
+  title?: string;
+};
 
 const EXTERNAL_HREF_RE = /^(https?:)?\/\//i;
 
