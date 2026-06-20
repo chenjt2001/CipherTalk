@@ -2,7 +2,6 @@ import { net } from 'electron'
 import { ConfigService } from '../services/config'
 import { appUpdateService } from '../services/appUpdateService'
 import { chatService } from '../services/chatService'
-import { httpApiService } from '../services/httpApiService'
 import { nightlyMemoryService } from '../services/memory/nightlyMemoryService'
 import { getMcpProxyConfig } from '../services/mcp/runtime'
 import { mcpProxyService } from '../services/mcp/proxyService'
@@ -270,30 +269,11 @@ export function startBackgroundSync(ctx: MainProcessContext): void {
 }
 
 /**
- * 启动本地 HTTP API、MCP 代理和 MCP 客户端连接恢复。
+ * 启动 MCP 代理和 MCP 客户端连接恢复。
  * 这些服务依赖配置，但不依赖窗口实例，因此放在启动编排层统一管理。
  */
 export async function startLocalIntegrationServices(ctx: MainProcessContext): Promise<void> {
   const configService = ctx.getConfigService()
-
-  const httpApiEnabled = configService?.get('httpApiEnabled') ?? false
-  const httpApiPort = configService?.get('httpApiPort') || 5031
-  const httpApiToken = (configService?.get('httpApiToken') || '').toString()
-  const configuredHttpApiListenMode = configService?.get('httpApiListenMode') === 'lan' ? 'lan' : 'localhost'
-  const httpApiListenMode = configuredHttpApiListenMode === 'lan' && !httpApiToken ? 'localhost' : configuredHttpApiListenMode
-  httpApiService.applySettings({
-    enabled: Boolean(httpApiEnabled),
-    port: Number(httpApiPort) || 5031,
-    token: httpApiToken,
-    listenMode: httpApiListenMode
-  })
-  markStartupMilestone('startup:http-api-start')
-  const httpApiStartResult = await httpApiService.start()
-  markStartupMilestone('startup:http-api-done', { success: httpApiStartResult.success })
-  if (!httpApiStartResult.success) {
-    warnStartupMilestone('startup:http-api-failed', { error: httpApiStartResult.error })
-    console.error('[HttpApi] 启动失败:', httpApiStartResult.error)
-  }
 
   const mcpProxyConfig = getMcpProxyConfig(configService ?? undefined)
   mcpProxyService.applySettings({
@@ -318,9 +298,6 @@ export async function startLocalIntegrationServices(ctx: MainProcessContext): Pr
 
 export function stopLocalIntegrationServices(): void {
   nightlyMemoryService.stop()
-  httpApiService.stop().catch((e) => {
-    console.error('[HttpApi] 停止失败:', e)
-  })
   mcpProxyService.stop().catch((e) => {
     console.error('[McpProxy] 停止失败:', e)
   })

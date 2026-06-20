@@ -135,8 +135,6 @@ export interface UpdateDownloadProgressPayload {
   bytesPerSecond: number
 }
 
-export type HttpApiListenMode = 'localhost' | 'lan'
-
 /**
  * Direct DB 迁移后的 WAL 变更广播 payload，
  * 通过 `wcdb:change` channel 从主进程推送到渲染端。
@@ -145,23 +143,6 @@ export interface WcdbChangePayload {
   table: 'Session' | 'Message' | 'Contact' | 'Sns' | 'Unknown'
   dbPath: string
   walPath: string
-}
-
-export interface HttpApiStatusPayload {
-  running: boolean
-  host: string
-  listenMode: HttpApiListenMode
-  port: number
-  enabled: boolean
-  startedAt: string
-  uptimeMs: number
-  tokenConfigured: boolean
-  tokenPreview: string
-  baseUrl: string
-  chatlabBaseUrl: string
-  lanAddresses: string[]
-  endpoints: Array<{ method: string; path: string; desc: string }>
-  lastError: string
 }
 
 export type AgentToolProfile = 'chat' | 'code' | 'hybrid'
@@ -653,23 +634,6 @@ export interface ElectronAPI {
         lastUpdatedAt: number
       }
     }) => void) => () => void
-  }
-  httpApi: {
-    getStatus: () => Promise<{
-      success: boolean
-      status?: HttpApiStatusPayload
-      error?: string
-    }>
-    applySettings: (payload: { enabled: boolean; port: number; token: string; listenMode: HttpApiListenMode }) => Promise<{
-      success: boolean
-      status?: HttpApiStatusPayload
-      error?: string
-    }>
-    restart: () => Promise<{
-      success: boolean
-      status?: HttpApiStatusPayload
-      error?: string
-    }>
   }
   systemAuth: {
     getStatus: () => Promise<{

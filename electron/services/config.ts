@@ -99,12 +99,6 @@ interface ConfigSchema {
   autoUpdateMinInterval: number       // 最小更新间隔（毫秒）
   autoUpdateDebounceTime: number      // 防抖时间（毫秒）
 
-  // HTTP API 相关
-  httpApiEnabled: boolean
-  httpApiPort: number
-  httpApiToken: string
-  httpApiListenMode: 'localhost' | 'lan'
-
   // 窗口关闭行为
   closeToTray: boolean
 
@@ -291,10 +285,6 @@ const defaults: ConfigSchema = {
   autoUpdateCheckInterval: 60,     // 默认 60 秒检查一次
   autoUpdateMinInterval: 1000,     // 默认最小更新间隔 1 秒
   autoUpdateDebounceTime: 500,     // 默认防抖时间 0.5 秒
-  httpApiEnabled: false,
-  httpApiPort: 5031,
-  httpApiToken: '',
-  httpApiListenMode: 'localhost',
   closeToTray: true,  // 默认最小化到托盘
   diarySummaryHour: 2,
   diaryCustomPrompt: '',

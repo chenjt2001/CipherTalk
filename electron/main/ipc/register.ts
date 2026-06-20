@@ -14,7 +14,6 @@ import { registerDataHandlers } from './dataHandlers'
 import { registerDeviceConnectHandlers } from './deviceConnectHandlers'
 import { registerDbPathHandlers } from './dbPathHandlers'
 import { registerExportHandlers } from './exportHandlers'
-import { registerHttpApiHandlers } from './httpApiHandlers'
 import { registerLogHandlers } from './logHandlers'
 import { registerMediaHandlers } from './mediaHandlers'
 import { registerMcpHandlers } from './mcpHandlers'
@@ -33,7 +32,6 @@ export function registerModularIpcHandlers(ctx: MainProcessContext): void {
   registerAccountHandlers(ctx)
   registerSkillHandlers(ctx)
   registerMcpHandlers()
-  registerHttpApiHandlers(ctx)
   registerDataHandlers(ctx)
   registerSystemHandlers()
   registerAppHandlers(ctx)

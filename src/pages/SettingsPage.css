@@ -1098,15 +1098,6 @@
   margin: 0;
 }
 
-.open-api-header-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.open-api-header-title h1 {
-  margin: 0;
-}
-
 .api-doc-link-btn {
   width: 28px;
   height: 28px;

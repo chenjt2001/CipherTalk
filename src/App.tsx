@@ -13,7 +13,6 @@ import ChatPage from './pages/ChatPage'
 import AgreementPage from './pages/AgreementPage'
 import DataManagementPage from './pages/DataManagementPage'
 import SettingsPage from './pages/SettingsPage'
-import OpenApiPage from './pages/OpenApiPage'
 import McpPage from './pages/McpPage'
 import AgentPage from './pages/agent/AgentPage'
 import DiaryPage from './pages/DiaryPage'
@@ -699,7 +698,7 @@ function App() {
   }
 
   // 主窗口 - 完整布局
-  const disableContentOverflow = ['/data-management', '/settings', '/open-api', '/mcp', '/agent', '/diary', '/pets'].includes(location.pathname)
+  const disableContentOverflow = ['/data-management', '/settings', '/mcp', '/agent', '/diary', '/pets'].includes(location.pathname)
   const fullPageRoutes = ['/home']
   const isFullPage = fullPageRoutes.includes(location.pathname)
   const edgeToEdgeRoutes: string[] = []
@@ -826,7 +825,6 @@ function App() {
               <Route path="/annual-report-window" element={<Navigate to="/home" replace />} />
               <Route path="/data-management" element={<DataManagementPage />} />
               <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/open-api" element={<OpenApiPage />} />
               <Route path="/mcp" element={<McpPage />} />
               <Route path="/agent" element={<AgentPage />} />
               <Route path="/diary" element={<DiaryPage />} />

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement, type CSSProperties, type Key } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Avatar, Button, ScrollShadow, Separator, Tabs, Tooltip } from '@heroui/react'
-import { Home, MessageSquare, Database, Settings, SquareChevronLeft, SquareChevronRight, Download, Aperture, Network, FileAudio, Bot, PawPrint, BookOpen } from 'lucide-react'
+import { Home, MessageSquare, Database, Settings, SquareChevronLeft, SquareChevronRight, Download, Aperture, FileAudio, Bot, PawPrint, BookOpen } from 'lucide-react'
 import { MCP } from '@lobehub/icons'
 import packageJson from '../../package.json'
 import { useAppStore } from '../stores/appStore'
@@ -77,7 +77,6 @@ function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
     { key: 'transcription-assistant', label: '转文字助手', icon: <FileAudio size={NAV_ICON_SIZE} />, type: 'route', path: '/transcription-assistant' },
     { key: 'export', label: '导出数据', icon: <Download size={NAV_ICON_SIZE} />, type: 'route', path: '/export' },
     { key: 'data-management', label: '数据管理', icon: <Database size={NAV_ICON_SIZE} />, type: 'route', path: '/data-management' },
-    { key: 'open-api', label: '开放接口', icon: <Network size={NAV_ICON_SIZE} />, type: 'route', path: '/open-api' },
     { key: 'mcp', label: 'MCP & Skills', icon: <MCP size={NAV_ICON_SIZE} />, type: 'route', path: '/mcp' },
   ]
   const activeNavKey = navItems.find(item => item.type === 'route' && isActive(item.path))?.key
