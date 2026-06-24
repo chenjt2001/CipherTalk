@@ -27,7 +27,7 @@ function VoiceBubble({ message, session, isSent, onContextMenu }: VoiceBubblePro
   const [sttTranscript, setSttTranscript] = useState<string | null>(null)
   const [sttLoading, setSttLoading] = useState(false)
   const [sttError, setSttError] = useState<string | null>(null)
-  const [sttProvider, setSttProvider] = useState<'aliyun-qwen-asr' | null>(null)
+  const [sttProvider, setSttProvider] = useState<'aliyun-qwen-asr' | 'qianwen-cloud' | null>(null)
   const [isEditingStt, setIsEditingStt] = useState(false)
   const [editContent, setEditContent] = useState('')
 
@@ -168,12 +168,18 @@ function VoiceBubble({ message, session, isSent, onContextMenu }: VoiceBubblePro
         const onlineReady = await checkOnlineSttConfigReady()
         modelExists = onlineReady.ready
         const onlineProvider = await window.electronAPI.config.get('sttOnlineProvider')
-        setSttProvider(onlineProvider === 'aliyun-qwen-asr' ? 'aliyun-qwen-asr' : null)
+        setSttProvider(
+          onlineProvider === 'aliyun-qwen-asr' || onlineProvider === 'qianwen-cloud'
+            ? onlineProvider as 'aliyun-qwen-asr' | 'qianwen-cloud'
+            : null
+        )
         modelName = onlineProvider === 'aliyun-qwen-asr'
           ? '阿里云 Qwen-ASR'
-          : onlineProvider === 'custom'
-            ? '自定义在线接口'
-            : 'OpenAI 兼容在线转写'
+          : onlineProvider === 'qianwen-cloud'
+            ? '千问云'
+            : onlineProvider === 'custom'
+              ? '自定义在线接口'
+              : 'OpenAI 兼容在线转写'
 
         if (!modelExists) {
           setSttError(onlineReady.error || '在线转写配置不完整，请先到设置页补齐')
@@ -403,7 +409,7 @@ function VoiceBubble({ message, session, isSent, onContextMenu }: VoiceBubblePro
           title={sttError || '点击转文字'}
         >
           {sttLoading ? (
-            sttProvider === 'aliyun-qwen-asr' ? (
+            (sttProvider === 'aliyun-qwen-asr' || sttProvider === 'qianwen-cloud') ? (
               <Qwen.Color className="stt-provider-loading-icon" size={18} />
             ) : (
               <Loader2 size={12} className="spin" />
@@ -417,7 +423,7 @@ function VoiceBubble({ message, session, isSent, onContextMenu }: VoiceBubblePro
               <path d="M12 4v16" />
             </svg>
           )}
-          {(sttProvider !== 'aliyun-qwen-asr' || !sttLoading) && (
+          {((sttProvider !== 'aliyun-qwen-asr' && sttProvider !== 'qianwen-cloud') || !sttLoading) && (
             <span>{sttLoading ? '转写中' : sttError ? '重试' : '转文字'}</span>
           )}
         </button>

@@ -113,7 +113,7 @@ export function registerSttHandlers(ctx: MainProcessContext): void {
   })
 
   ipcMain.handle('stt-online:test-config', async (_, overrides?: {
-    provider?: 'openai-compatible' | 'aliyun-qwen-asr' | 'custom'
+    provider?: 'openai-compatible' | 'aliyun-qwen-asr' | 'qianwen-cloud' | 'custom'
     apiKey?: string
     baseURL?: string
     model?: string

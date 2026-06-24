@@ -29,7 +29,7 @@ const sttOnlineLanguageOptions = [
 
 const sttOnlineProviderOptions = [
   { value: 'openai-compatible', label: 'OpenAI 兼容' },
-  { value: 'aliyun-qwen-asr', label: '阿里云 Qwen-ASR' },
+  { value: 'aliyun-qwen-asr', label: '阿里云 / 千问云（Qwen-ASR）' },
   { value: 'custom', label: '自定义接口' }
 ] as const
 
@@ -169,20 +169,18 @@ function SttTab({ active, showMessage }: SttTabProps) {
   const handleSttOnlineProviderChange = (provider: SttOnlineProvider) => {
     setSttOnlineProvider(provider)
 
-    if (provider === 'aliyun-qwen-asr') {
-      if (!sttOnlineBaseURL || sttOnlineBaseURL === STT_ONLINE_DEFAULTS['openai-compatible'].baseURL) {
-        setSttOnlineBaseURL(STT_ONLINE_DEFAULTS['aliyun-qwen-asr'].baseURL)
-      }
-      if (!sttOnlineModel || sttOnlineModel === STT_ONLINE_DEFAULTS['openai-compatible'].model) {
-        setSttOnlineModel(STT_ONLINE_DEFAULTS['aliyun-qwen-asr'].model)
-      }
-    } else if (provider === 'openai-compatible') {
-      if (!sttOnlineBaseURL || sttOnlineBaseURL === STT_ONLINE_DEFAULTS['aliyun-qwen-asr'].baseURL) {
-        setSttOnlineBaseURL(STT_ONLINE_DEFAULTS['openai-compatible'].baseURL)
-      }
-      if (!sttOnlineModel || sttOnlineModel === STT_ONLINE_DEFAULTS['aliyun-qwen-asr'].model) {
-        setSttOnlineModel(STT_ONLINE_DEFAULTS['openai-compatible'].model)
-      }
+    if (provider === 'custom') return
+
+    // 只在当前值为空、或仍是某个预设的默认值时才覆盖，避免冲掉用户自定义的配置
+    const target = STT_ONLINE_DEFAULTS[provider]
+    const presetBaseURLs: string[] = Object.values(STT_ONLINE_DEFAULTS).map(d => d.baseURL).filter(Boolean)
+    const presetModels: string[] = Object.values(STT_ONLINE_DEFAULTS).map(d => d.model).filter(Boolean)
+
+    if (!sttOnlineBaseURL || presetBaseURLs.includes(sttOnlineBaseURL)) {
+      setSttOnlineBaseURL(target.baseURL)
+    }
+    if (!sttOnlineModel || presetModels.includes(sttOnlineModel)) {
+      setSttOnlineModel(target.model)
     }
   }
 
@@ -878,7 +876,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
               {sttOnlineProvider === 'openai-compatible'
                 ? '选择 OpenAI 兼容时会自动补全标准路径'
                 : sttOnlineProvider === 'aliyun-qwen-asr'
-                  ? '阿里云走 DashScope 兼容入口'
+                  ? '阿里云、千问云都走 DashScope 兼容入口；换模型直接改下方模型名'
                   : '自定义接口会直接使用你填写的完整 URL'}
             </Description>
           </Select>
@@ -921,7 +919,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
               </InputGroup>
               <Description>
                 {sttOnlineProvider === 'aliyun-qwen-asr'
-                  ? '默认使用 qwen3-asr-flash'
+                  ? '默认 qwen3-asr-flash，可改成 qwen-omni 等其他 qwen 系列语音模型'
                   : '可替换为兼容模型名'}
               </Description>
             </TextField>

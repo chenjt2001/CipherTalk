@@ -271,10 +271,12 @@ export async function setSttMode(mode: 'cpu' | 'gpu' | 'online'): Promise<void> 
 
 export async function getSttOnlineProvider(): Promise<'openai-compatible' | 'aliyun-qwen-asr' | 'custom'> {
   const value = await config.get(CONFIG_KEYS.STT_ONLINE_PROVIDER)
+  // qianwen-cloud 已并入 aliyun-qwen-asr（同一 DashScope 兼容端点），读取时归一为后者
+  if (value === 'qianwen-cloud') return 'aliyun-qwen-asr'
   return (value as 'openai-compatible' | 'aliyun-qwen-asr' | 'custom') || 'openai-compatible'
 }
 
-export async function setSttOnlineProvider(provider: 'openai-compatible' | 'aliyun-qwen-asr' | 'custom'): Promise<void> {
+export async function setSttOnlineProvider(provider: 'openai-compatible' | 'aliyun-qwen-asr' | 'qianwen-cloud' | 'custom'): Promise<void> {
   await config.set(CONFIG_KEYS.STT_ONLINE_PROVIDER, provider)
 }
 

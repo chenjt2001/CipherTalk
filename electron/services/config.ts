@@ -80,7 +80,7 @@ interface ConfigSchema {
   sttModelType: 'int8' | 'float32'
   sttMode: 'cpu' | 'gpu' | 'online'  // STT 模式：CPU / GPU / 在线
   whisperModelType: 'tiny' | 'base' | 'small' | 'medium'  // Whisper 模型类型
-  sttOnlineProvider: 'openai-compatible' | 'aliyun-qwen-asr' | 'custom'
+  sttOnlineProvider: 'openai-compatible' | 'aliyun-qwen-asr' | 'qianwen-cloud' | 'custom'
   sttOnlineApiKey: string
   sttOnlineBaseURL: string
   sttOnlineModel: string

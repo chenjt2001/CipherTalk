@@ -1,6 +1,6 @@
 import { ConfigService } from './config'
 
-type OnlineProvider = 'openai-compatible' | 'aliyun-qwen-asr' | 'custom'
+type OnlineProvider = 'openai-compatible' | 'aliyun-qwen-asr' | 'qianwen-cloud' | 'custom'
 
 export interface OnlineTranscribeConfig {
   provider: OnlineProvider
@@ -37,7 +37,19 @@ export class VoiceTranscribeServiceOnline {
     onPartial?: (text: string) => void
   ): Promise<{ success: boolean; transcript?: string; error?: string }> {
     const dataUrl = `data:audio/wav;base64,${wavData.toString('base64')}`
-    const response = await fetch(this.resolveRequestUrl(config), {
+    const requestUrl = this.resolveRequestUrl(config)
+    const maskedKey = config.apiKey
+      ? `${config.apiKey.slice(0, 6)}…${config.apiKey.slice(-4)} (len=${config.apiKey.length})`
+      : '(空)'
+    console.log('[STT-Online][Aliyun] 发起转写请求', {
+      provider: config.provider,
+      url: requestUrl,
+      model: config.model,
+      apiKey: maskedKey,
+      audioBytes: wavData.length
+    })
+
+    const response = await fetch(requestUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${config.apiKey}`,
@@ -64,21 +76,52 @@ export class VoiceTranscribeServiceOnline {
       signal
     })
 
+    console.log('[STT-Online][Aliyun] 响应状态', response.status, response.statusText)
+
     if (!response.ok) {
+      let rawBody = ''
+      try {
+        rawBody = await response.text()
+      } catch {
+        rawBody = ''
+      }
       let payload: any = null
       try {
-        payload = await response.json()
+        payload = rawBody ? JSON.parse(rawBody) : null
       } catch {
         payload = null
       }
 
-      if (response.status === 401 || response.status === 403) {
-        return { success: false, error: '阿里云在线转写认证失败，请检查 API Key' }
+      console.error('[STT-Online][Aliyun] 转写失败', {
+        status: response.status,
+        url: requestUrl,
+        model: config.model,
+        body: rawBody || '(空响应体)'
+      })
+
+      const serverMessage = payload?.error?.message || payload?.message || rawBody?.slice(0, 300)
+
+      if (response.status === 401) {
+        return {
+          success: false,
+          error: serverMessage
+            ? `在线转写认证失败：${serverMessage}`
+            : '在线转写认证失败，请检查 API Key'
+        }
+      }
+      if (response.status === 403) {
+        // 403 多为额度耗尽或无该模型权限，而非 Key 错误
+        return {
+          success: false,
+          error: serverMessage
+            ? `在线转写被拒绝 (403)：${serverMessage}`
+            : '在线转写被拒绝 (403)，可能是免费额度耗尽或无该模型权限，请到控制台检查'
+        }
       }
       if (response.status === 429) {
         return { success: false, error: '阿里云在线转写请求过于频繁或额度不足，请稍后重试' }
       }
-      const message = payload?.error?.message || payload?.message || `HTTP ${response.status}`
+      const message = serverMessage || `HTTP ${response.status}`
       return { success: false, error: `阿里云在线转写失败: ${message}` }
     }
 
@@ -213,8 +256,12 @@ export class VoiceTranscribeServiceOnline {
     return { valid: true }
   }
 
+  private isAliyunStyle(provider: OnlineProvider): boolean {
+    return provider === 'aliyun-qwen-asr' || provider === 'qianwen-cloud'
+  }
+
   private resolveRequestUrl(config: OnlineTranscribeConfig): string {
-    if (config.provider === 'aliyun-qwen-asr') {
+    if (this.isAliyunStyle(config.provider)) {
       return this.resolveAliyunChatUrl(config.baseURL)
     }
     return config.provider === 'custom'
@@ -223,7 +270,7 @@ export class VoiceTranscribeServiceOnline {
   }
 
   private resolveTestUrl(config: OnlineTranscribeConfig): string {
-    if (config.provider === 'aliyun-qwen-asr') {
+    if (this.isAliyunStyle(config.provider)) {
       return this.resolveModelsUrl(config.baseURL)
     }
     return config.provider === 'custom'
@@ -268,8 +315,8 @@ export class VoiceTranscribeServiceOnline {
           error:
             config.provider === 'custom'
               ? '自定义接口 URL 不可用，请确认你填写的是完整接口地址'
-              : config.provider === 'aliyun-qwen-asr'
-                ? '阿里云接口 URL 不可用，请确认是否为 DashScope 兼容入口地址'
+              : this.isAliyunStyle(config.provider)
+                ? '接口 URL 不可用，请确认是否为 DashScope 兼容入口地址'
                 : '接口 URL 不可用，请确认它是否为 OpenAI 兼容接口或对应的 /v1 地址'
         }
       }
@@ -299,7 +346,7 @@ export class VoiceTranscribeServiceOnline {
     const timeout = setTimeout(() => controller.abort(), config.timeoutMs)
 
     try {
-      if (config.provider === 'aliyun-qwen-asr') {
+      if (this.isAliyunStyle(config.provider)) {
         return await this.transcribeWithAliyun(wavData, config, controller.signal, onPartial)
       }
 
