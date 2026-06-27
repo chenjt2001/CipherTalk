@@ -82,41 +82,6 @@ async function handleMessage(msg: any) {
       case 'getNativeMessages':
         result = await core.getNativeMessages(payload.sessionId, payload.limit, payload.offset)
         break
-      case 'openMessageCursor':
-        result = await core.openMessageCursor(
-          payload.sessionId,
-          payload.batchSize,
-          payload.ascending,
-          payload.beginTimestamp,
-          payload.endTimestamp
-        )
-        break
-      case 'openMessageCursorLite':
-        result = await core.openMessageCursorLite(
-          payload.sessionId,
-          payload.batchSize,
-          payload.ascending,
-          payload.beginTimestamp,
-          payload.endTimestamp
-        )
-        break
-      case 'fetchMessageBatch':
-        result = await core.fetchMessageBatch(payload.cursor)
-        break
-      case 'getMessageBatchViaCursor':
-        result = await core.getMessageBatchViaCursor(
-          payload.sessionId,
-          payload.batchSize,
-          payload.ascending,
-          payload.beginTimestamp,
-          payload.endTimestamp,
-          payload.useLite,
-          payload.maxBatches
-        )
-        break
-      case 'closeMessageCursor':
-        result = await core.closeMessageCursor(payload.cursor)
-        break
       case 'setMonitor':
         if (!monitorRegistered) {
           monitorRegistered = core.setMonitor((t, j) => {

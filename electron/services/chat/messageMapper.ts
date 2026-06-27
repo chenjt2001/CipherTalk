@@ -1,4 +1,3 @@
-import { wcdbService } from '../wcdbService'
 import { cleanAccountDirName } from './accountUtils'
 import { compareMessageCursorDesc, messageIdentityKey } from './types'
 import type { Message, ChatRecordItem } from './types'
@@ -124,55 +123,6 @@ export function updateSessionCursorFromPage(state: ChatServiceState, sessionId: 
   const currentCursor = state.sessionCursor.get(sessionId) || 0
   if (latestMsg.sortSeq > currentCursor) {
     state.sessionCursor.set(sessionId, latestMsg.sortSeq)
-  }
-}
-
-/**
- * 这些会话没有独立消息表（公众号聚合 / 公众号 / @placeholder 虚拟会话）。
- * native 游标在它们上找不到表会 rc=-3，且失败路径可能触发抓不到的 napi fatal 拖垮 wcdb 子进程。
- * 对它们直接跳过 native 游标，走下游 SQL 回退（对无表会话 SQL 会优雅返回空）。
- */
-function isNativeCursorUnsafeSession(sessionId: string): boolean {
-  const id = String(sessionId || '')
-  return id === 'brandsessionholder' || id.startsWith('@') || id.startsWith('gh_')
-}
-
-export async function getMessagesViaNativeCursor(
-  state: ChatServiceState,
-  sessionId: string,
-  limit: number
-): Promise<{ success: boolean; messages?: Message[]; hasMore?: boolean; error?: string }> {
-  if (isNativeCursorUnsafeSession(sessionId)) {
-    return { success: false, error: '虚拟/无消息表会话，跳过 native 游标' }
-  }
-  const batchSize = Math.max(limit + 20, 80)
-  let batch: { success: boolean; rows?: any[]; hasMore?: boolean; error?: string }
-  try {
-    batch = await wcdbService.getMessageBatchViaCursor(sessionId, batchSize, false, 0, 0, true, 1)
-  } catch (e: any) {
-    const error = e?.message || String(e)
-    console.warn('[ChatService] native cursor getMessages 崩溃/退出，回退 SQL:', error)
-    return { success: false, error }
-  }
-  if (!batch.success) {
-    return { success: false, error: batch.error || '获取消息批次失败' }
-  }
-
-  const collected: Message[] = []
-  const rows = Array.isArray(batch.rows) ? batch.rows : []
-  for (const row of rows) {
-    const msg = rowToMessage(state, row)
-    if (isMessageVisibleForSession(sessionId, msg)) {
-      collected.push(msg)
-    }
-  }
-
-  const normalized = normalizeMessagesForUi(collected, sessionId, limit)
-  updateSessionCursorFromPage(state, sessionId, normalized.messages)
-  return {
-    success: true,
-    messages: normalized.messages,
-    hasMore: normalized.hasExtra || batch.hasMore === true
   }
 }
 

@@ -1,12 +1,10 @@
 import { dbAdapter } from '../dbAdapter'
-import { wcdbService } from '../wcdbService'
 import { cleanAccountDirName } from './accountUtils'
 import { findSessionTables, checkTableExists, resolveMyRowId, refreshMessageDbCache } from './tableResolver'
 import {
   rowToMessage,
   normalizeMessagesForUi,
   updateSessionCursorFromPage,
-  getMessagesViaNativeCursor,
   resolveMessageLocalType,
   resolveRowIsSend,
   isMessageVisibleForSession,
@@ -49,17 +47,6 @@ export async function getMessages(state: ChatServiceState,
       const cached = state.preloadCache.messages.get(sessionId)!
       state.preloadCache.messages.delete(sessionId)
       return cached
-    }
-
-    const normalizedLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 50)))
-
-    if (Math.max(0, Math.floor(Number(offset) || 0)) === 0) {
-      // 跳过 direct native 批量读取；该 native 路径异常时会触发 napi fatal，无法被 JS 捕获。
-      // cursor 路径失败时仍会继续走下面的 SQL fallback。
-      const nativeCursor = await getMessagesViaNativeCursor(state, sessionId, normalizedLimit)
-      if (nativeCursor.success) {
-        return nativeCursor
-      }
     }
 
     // 获取当前用户的 wxid
@@ -270,9 +257,9 @@ export async function getMessages(state: ChatServiceState,
 
 /**
  * 获取指定时间之后的新消息。
- * 优先走 WeFlow native cursor；cursor 不可用时回退到现有最新页查询。
+ * （native 游标已移除）直接取最新页并按时间过滤。
  */
-export async function getNewMessages(state: ChatServiceState, 
+export async function getNewMessages(state: ChatServiceState,
   sessionId: string,
   minTime: number,
   limit: number = 1000
@@ -283,44 +270,9 @@ export async function getNewMessages(state: ChatServiceState,
   const normalizedLimit = Math.max(1, Math.min(2000, Math.floor(Number(limit) || 1000)))
 
   try {
-    let nativeResult: { success: boolean; rows?: any[]; error?: string }
-    try {
-      nativeResult = await wcdbService.getNewMessages(sessionId, normalizedMinTime, normalizedLimit)
-    } catch (e: any) {
-      nativeResult = { success: false, error: e?.message || String(e) }
-    }
-
-    if (nativeResult.success) {
-      let messages = (nativeResult.rows || [])
-        .map(row => rowToMessage(state, row))
-        .filter(msg => isMessageVisibleForSession(sessionId, msg))
-        .filter(msg => Number(msg.createTime || 0) >= normalizedMinTime)
-
-      const seen = new Set<string>()
-      messages = messages
-        .sort(compareMessageCursorAsc)
-        .filter(msg => {
-          const key = messageIdentityKey(msg)
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
-
-      if (messages.length > 0) {
-        const latestMsg = messages[messages.length - 1]
-        const currentCursor = state.sessionCursor.get(sessionId) || 0
-        if (latestMsg.sortSeq > currentCursor) {
-          state.sessionCursor.set(sessionId, latestMsg.sortSeq)
-        }
-      }
-
-      return { success: true, messages }
-    }
-
-    console.warn('[ChatService] native cursor getNewMessages 失败，回退到最新页查询:', nativeResult.error)
     const fallback = await getMessages(state, sessionId, 0, Math.min(normalizedLimit, 200))
     if (!fallback.success || !fallback.messages) {
-      return { success: false, error: nativeResult.error || fallback.error || '获取新消息失败' }
+      return { success: false, error: fallback.error || '获取新消息失败' }
     }
     return {
       success: true,

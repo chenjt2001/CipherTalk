@@ -183,68 +183,6 @@ export class WcdbService extends EventEmitter {
     return this.callWithAutoOpen('getNativeMessages', { sessionId, limit, offset })
   }
 
-  async openMessageCursor(
-    sessionId: string,
-    batchSize: number,
-    ascending: boolean,
-    beginTimestamp: number,
-    endTimestamp: number
-  ): Promise<{ success: boolean; cursor?: number; error?: string }> {
-    return this.callWithAutoOpen('openMessageCursor', { sessionId, batchSize, ascending, beginTimestamp, endTimestamp })
-  }
-
-  async openMessageCursorLite(
-    sessionId: string,
-    batchSize: number,
-    ascending: boolean,
-    beginTimestamp: number,
-    endTimestamp: number
-  ): Promise<{ success: boolean; cursor?: number; error?: string }> {
-    return this.callWithAutoOpen('openMessageCursorLite', { sessionId, batchSize, ascending, beginTimestamp, endTimestamp })
-  }
-
-  async fetchMessageBatch(cursor: number): Promise<{ success: boolean; rows?: any[]; hasMore?: boolean; error?: string }> {
-    return this.callWithAutoOpen('fetchMessageBatch', { cursor })
-  }
-
-  async getMessageBatchViaCursor(
-    sessionId: string,
-    batchSize: number,
-    ascending: boolean,
-    beginTimestamp: number,
-    endTimestamp: number,
-    useLite: boolean = true,
-    maxBatches: number = 1
-  ): Promise<{ success: boolean; rows?: any[]; hasMore?: boolean; error?: string }> {
-    return this.callWithAutoOpen('getMessageBatchViaCursor', {
-      sessionId,
-      batchSize,
-      ascending,
-      beginTimestamp,
-      endTimestamp,
-      useLite,
-      maxBatches
-    })
-  }
-
-  async closeMessageCursor(cursor: number): Promise<{ success: boolean; error?: string }> {
-    return this.callWithAutoOpen('closeMessageCursor', { cursor })
-  }
-
-  async getNewMessages(sessionId: string, minTime: number, limit: number = 1000): Promise<{ success: boolean; rows?: any[]; error?: string }> {
-    const openRes = await this.openMessageCursor(sessionId, limit, true, minTime, 0)
-    if (!openRes.success || !openRes.cursor) {
-      return { success: false, error: openRes.error || '创建游标失败' }
-    }
-    try {
-      const batch = await this.fetchMessageBatch(openRes.cursor)
-      if (!batch.success) return { success: false, error: batch.error || '获取批次失败' }
-      return { success: true, rows: batch.rows || [] }
-    } finally {
-      await this.closeMessageCursor(openRes.cursor).catch(() => undefined)
-    }
-  }
-
   async setMonitor(): Promise<boolean> {
     this.monitorRequested = true
     const res = await this.callWithAutoOpen<{ success: boolean }>('setMonitor', {})
