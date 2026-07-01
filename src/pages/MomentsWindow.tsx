@@ -4,6 +4,7 @@ import { Loader2, RefreshCw, Search, Calendar, User, X, Filter, AlertTriangle, P
 import { ImagePreview } from '../components/ImagePreview'
 import { LivePhotoIcon } from '../components/LivePhotoIcon'
 import { parseWechatEmoji, parseWechatEmojiHtml } from '../utils/wechatEmoji'
+import { createLiquidGlassMap, type GlassFilterMap } from '../utils/liquidGlass'
 import TitleBar from '../components/TitleBar'
 import JumpToDateDialog from '../components/JumpToDateDialog'
 import DateRangePicker from '../components/DateRangePicker'
@@ -166,6 +167,39 @@ const formatXml = (xml: string) => {
 const mediaPathCache = new Map<string, { imagePath: string; liveVideoPath?: string }>()
 
 // 媒体项组件
+// 媒体按钮（下载/实况/播放）用的液态玻璃折射滤镜：按钮是圆形，用对称形状生成位移贴图，
+// 每个固定尺寸一张，注入 SVG filter defs，CSS 按尺寸 url(#moments-glass-N) 引用。
+const GLASS_BTN_SIZES = [32, 36, 44, 48] as const
+// radius(+halfX/halfY 同步) = 中心平坦区半径，越小折射环越宽；feather = 渐变铺开范围
+const GLASS_CIRCLE = { halfX: 0.18, halfY: 0.18, radius: 0.18, edge: 0.02, feather: 0.35, strength: 3 }
+
+const MomentsGlassDefs = ({ onReady }: { onReady: () => void }) => {
+  const [maps, setMaps] = useState<Record<number, GlassFilterMap>>({})
+  useEffect(() => {
+    const next: Record<number, GlassFilterMap> = {}
+    for (const s of GLASS_BTN_SIZES) {
+      const m = createLiquidGlassMap(s, s, GLASS_CIRCLE)
+      if (m) next[s] = m
+    }
+    setMaps(next)
+    if (Object.keys(next).length) onReady()
+  }, [onReady])
+  return (
+    <svg className="moments-glass-defs" aria-hidden="true" focusable="false">
+      {GLASS_BTN_SIZES.map((s) => {
+        const m = maps[s]
+        if (!m) return null
+        return (
+          <filter key={s} id={`moments-glass-${s}`} filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB" x="0" y="0" width={m.width} height={m.height}>
+            <feImage href={m.href} xlinkHref={m.href} width={m.width} height={m.height} result="displacementMap" />
+            <feDisplacementMap in="SourceGraphic" in2="displacementMap" scale={m.scale} xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+        )
+      })}
+    </svg>
+  )
+}
+
 const MediaItem = ({ media, isSingle, allMedia, onPreview }: { media: any; isSingle?: boolean; allMedia?: any[]; onPreview: (src: string, isVideo?: boolean, liveVideoPath?: string) => void }) => {
   const [error, setError] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -529,13 +563,13 @@ const MediaItem = ({ media, isSingle, allMedia, onPreview }: { media: any; isSin
 
       {isVisible && isLive && !isVideo && (
         <div className="live-photo-badge" title={liveVideoPath ? 'Live Photo (已加载)' : 'Live Photo (加载中...)'}>
-          <LivePhotoIcon size={14} className="live-icon" />
+          <LivePhotoIcon size={18} className="live-icon" />
         </div>
       )}
 
       {isVisible && (
         <button className="download-btn-overlay" onClick={handleDownload} title="下载原图">
-          <Download size={14} />
+          <Download size={18} />
         </button>
       )}
     </div>
@@ -1591,8 +1625,12 @@ document.querySelectorAll('.vi video').forEach(function(v) {
     c.username.toLowerCase().includes(contactSearch.toLowerCase())
   )
 
+  const [glassReady, setGlassReady] = useState(false)
+  const handleGlassReady = useCallback(() => setGlassReady(true), [])
+
   return (
-    <div className="moments-window">
+    <div className={`moments-window${glassReady ? ' moments-glass-ready' : ''}`}>
+      <MomentsGlassDefs onReady={handleGlassReady} />
       {/* 侧边栏 (左侧) */}
       <aside className={`sns-sidebar ${isSidebarOpen ? 'open' : 'closed'}`}>
           <div className="moments-sidebar-drag-region" aria-hidden="true" />

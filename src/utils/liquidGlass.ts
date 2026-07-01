@@ -20,7 +20,17 @@ function roundedRectSdf(x: number, y: number, width: number, height: number, rad
   return Math.min(Math.max(qx, qy), 0) + vectorLength(Math.max(qx, 0), Math.max(qy, 0)) - radius
 }
 
-export function createLiquidGlassMap(width: number, height: number): GlassFilterMap | null {
+export type GlassShapeOptions = {
+  halfX?: number   // 归一化半宽（相对元素）；胶囊默认 0.3
+  halfY?: number   // 归一化半高；胶囊默认 0.2
+  radius?: number  // 圆角半径（归一化）；默认 0.6
+  edge?: number    // 边缘折射带偏移；默认 0.15
+  feather?: number // 折射带羽化范围；默认 0.8
+  strength?: number // 折射强度倍率（只乘最终 scale，真正放大位移）；默认 1
+}
+
+export function createLiquidGlassMap(width: number, height: number, opts: GlassShapeOptions = {}): GlassFilterMap | null {
+  const { halfX = 0.3, halfY = 0.2, radius = 0.6, edge = 0.15, feather = 0.8, strength = 1 } = opts
   const w = Math.max(1, Math.round(width))
   const h = Math.max(1, Math.round(height))
   const canvas = document.createElement('canvas')
@@ -39,8 +49,8 @@ export function createLiquidGlassMap(width: number, height: number): GlassFilter
     const uvY = y / h
     const ix = uvX - 0.5
     const iy = uvY - 0.5
-    const distanceToEdge = roundedRectSdf(ix, iy, 0.3, 0.2, 0.6)
-    const displacement = smoothStep(0.8, 0, distanceToEdge - 0.15)
+    const distanceToEdge = roundedRectSdf(ix, iy, halfX, halfY, radius)
+    const displacement = smoothStep(feather, 0, distanceToEdge - edge)
     const scaled = smoothStep(0, 1, displacement)
     const targetX = (ix * scaled + 0.5) * w
     const targetY = (iy * scaled + 0.5) * h
@@ -66,6 +76,6 @@ export function createLiquidGlassMap(width: number, height: number): GlassFilter
     href: canvas.toDataURL(),
     width: w,
     height: h,
-    scale: maxScale,
+    scale: maxScale * strength,
   }
 }

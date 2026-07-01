@@ -1806,7 +1806,7 @@ export default function AgentPage() {
           <PromptInputControllerBridge controllerRef={promptInputControllerRef} />
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv,.pdf,application/pdf"
-            className={`agent-prompt-input w-full **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
+            className={`agent-prompt-input w-full **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple
@@ -1814,7 +1814,6 @@ export default function AgentPage() {
             onDragOver={handleWorkspaceFileDragOver}
             onDrop={handleWorkspaceFileDrop}
             onSubmit={handleSubmit}
-            style={{ '--agent-radius': '22px' } as CSSProperties}
           >
             <AgentPromptAssetHeader
               onRemoveWorkspaceFileReference={removeWorkspaceFileReference}

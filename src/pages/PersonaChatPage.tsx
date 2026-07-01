@@ -10,7 +10,6 @@ import { useLocation } from 'react-router-dom'
 import { useChat } from '@ai-sdk/react'
 import { AlertDialog, Button, ProgressBar, Dropdown, Header, Label, Modal, Skeleton, Tooltip } from '@heroui/react'
 import type { FileUIPart, UIMessage } from 'ai'
-import type { CSSProperties } from 'react'
 import {
   PromptInput,
   PromptInputActionAddAttachments,
@@ -1421,12 +1420,11 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
         <div className="pointer-events-auto w-full max-w-[min(64rem,calc(100%-2.5rem))]">
           <PromptInput
             accept="image/*"
-            className="persona-prompt-input w-full **:data-[slot=input-group]:rounded-(--persona-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-lg"
+            className="persona-prompt-input w-full **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-lg"
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple
             onSubmit={handlePromptSubmit}
-            style={{ '--persona-radius': '22px' } as CSSProperties}
           >
             <PromptInputHeader className="flex-col items-stretch gap-1.5 px-3 pt-2 pb-0">
               <PromptInputAttachments className="p-0">

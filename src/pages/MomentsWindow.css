@@ -352,7 +352,8 @@
   min-width: 0;
   margin: 0 12px 12px 0;
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: 24px;
+  corner-shape: squircle; /* 与主窗口主区域一致的连续曲率圆角 */
   background: var(--bg-primary);
   overflow: hidden;
   position: relative;
@@ -720,8 +721,8 @@
   position: absolute;
   bottom: 8px;
   right: 8px;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.22);
   backdrop-filter: blur(8px);
@@ -735,16 +736,16 @@
   z-index: 2;
 }
 .post-media-grid .media-item .live-photo-badge svg {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   color: white;
 }
 .post-media-grid .media-item .download-btn-overlay {
   position: absolute;
   top: 6px;
   right: 6px;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   background: rgba(255, 255, 255, 0.22);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -978,6 +979,55 @@
 .post-finder-card .finder-cover .finder-play-icon:hover {
   transform: translate(-50%, -50%) scale(1.08);
 }
+
+/* 媒体上的下载/实况/播放按钮统一液态玻璃质感，对齐图片查看器工具栏（saturate 让底图透色 + 顶部内高光边缘 + 层次阴影）。
+   放在各按钮定义之后靠源序覆盖底色/模糊/边框/阴影；:hover 带伪类特异性更高，变色态不受影响。 */
+.post-media-grid .media-item .video-play-icon,
+.post-media-grid .media-item .live-photo-badge,
+.post-media-grid .media-item .download-btn-overlay,
+.post-finder-card .finder-cover .finder-play-icon {
+  background: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(3px) saturate(180%);
+  -webkit-backdrop-filter: blur(1px) saturate(180%);
+  border: none;
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.22),
+    inset 0 -6px 14px rgba(0, 0, 0, 0.12);
+}
+
+/* 液态玻璃折射：SVG 位移贴图 defs 生成完成后（.moments-glass-ready）按钮尺寸各引用一张。
+   贴图运行时按元素尺寸生成，故 filter id 按尺寸区分。模糊要小，折射才透得出来。 */
+.moments-glass-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.moments-glass-ready .post-media-grid .media-item .video-play-icon {
+  backdrop-filter: url(#moments-glass-48) blur(1px) brightness(1.06) saturate(1.5);
+  -webkit-backdrop-filter: url(#moments-glass-48) blur(1px) brightness(1.06) saturate(1.5);
+}
+.moments-glass-ready .post-finder-card .finder-cover .finder-play-icon {
+  backdrop-filter: url(#moments-glass-44) blur(1px) brightness(1.06) saturate(1.5);
+  -webkit-backdrop-filter: url(#moments-glass-44) blur(1px) brightness(1.06) saturate(1.5);
+}
+.moments-glass-ready .post-media-grid .media-item .download-btn-overlay {
+  backdrop-filter: url(#moments-glass-36) blur(1px) brightness(1.06) saturate(1.5);
+  -webkit-backdrop-filter: url(#moments-glass-36) blur(1px) brightness(1.06) saturate(1.5);
+}
+.moments-glass-ready .post-media-grid .media-item .live-photo-badge {
+  backdrop-filter: url(#moments-glass-32) blur(1px) brightness(1.06) saturate(1.5);
+  -webkit-backdrop-filter: url(#moments-glass-32) blur(1px) brightness(1.06) saturate(1.5);
+}
+/* 媒体按钮图标统一白底 + 黑描边，玻璃/亮图上都看得清。 */
+.post-media-grid .media-item .video-play-icon svg,
+.post-media-grid .media-item .download-btn-overlay svg,
+.post-media-grid .media-item .live-photo-badge svg,
+.post-finder-card .finder-cover .finder-play-icon svg {
+  color: #fff;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.55));
+}
+
 .post-finder-card .finder-info {
   padding: 10px 12px;
 }
@@ -1244,7 +1294,7 @@
   }
   .moments-main {
     margin: 0 8px 8px 0;
-    border-radius: 12px;
+    border-radius: 24px;
   }
   .moments-main .moments-content {
     padding: 60px 16px 16px;
