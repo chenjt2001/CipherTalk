@@ -4,8 +4,8 @@ import './SplashPage.css'
 // 窗口内容尺寸（见 windowManager.createSplashWindow），与图片 16:9 比例一致
 const W = 480
 const H = 270
-const R = 30 // 圆角半径(px)
-const N = 5 // 超椭圆指数：2=圆弧，越大越方，苹果 App 图标 ≈5（连续曲率圆角）
+const R = 56 // 圆角半径(px)
+const N = 3 // 超椭圆指数：2=圆弧，越大越方，苹果 App 图标 ≈5（连续曲率圆角）
 const SEG = 16
 
 // 生成连续曲率（超椭圆 squircle）圆角矩形的 clip-path。普通 border-radius 是圆弧，这里用超椭圆四角。
@@ -67,6 +67,11 @@ function SplashPage() {
         alt="密语 CipherTalk"
         style={{ clipPath: `path('${squirclePath()}')` }}
       />
+      <div className="splash-loading" aria-label="正在加载">
+        <span className="splash-dot" />
+        <span className="splash-dot" />
+        <span className="splash-dot" />
+      </div>
     </div>
   )
 }

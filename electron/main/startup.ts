@@ -95,6 +95,15 @@ export async function checkAndConnectOnStartup(ctx: MainProcessContext): Promise
   markStartupMilestone('startup:splash-window-create-done')
   ctx.setSplashReady(false)
 
+  // 启动屏至少显示 5s，把预加载时间留足；即使开库/预加载秒回也不提前消失。
+  const splashStart = Date.now()
+  const MIN_SPLASH_MS = 5000
+  const closeSplashAfterFloor = async () => {
+    const remaining = MIN_SPLASH_MS - (Date.now() - splashStart)
+    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining))
+    await ctx.getWindowManager().closeSplashWindow()
+  }
+
   return new Promise<boolean>((resolve) => {
     const checkReady = setInterval(() => {
       if (ctx.getSplashReady()) {
@@ -107,13 +116,13 @@ export async function checkAndConnectOnStartup(ctx: MainProcessContext): Promise
               new Promise<void>(resolve => setTimeout(resolve, 5000))
             ])
           }
-          await ctx.getWindowManager().closeSplashWindow()
+          await closeSplashAfterFloor()
           ctx.setStartupDbConnected(connected)
           resolve(connected)
         }).catch(async (e) => {
           logStartupError('startup:configured-wcdb-connect-failed', e)
           console.error('启动时连接数据库失败:', e)
-          await ctx.getWindowManager().closeSplashWindow()
+          await closeSplashAfterFloor()
           resolve(false)
         })
       }
