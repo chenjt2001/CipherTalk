@@ -3018,127 +3018,138 @@ class ExportService {
               } catch { }
             }
 
-            // 5. 串行处理语音（避免内存溢出）
+            // 5. 3 路并发处理语音：I/O（MediaDb 查询、writeFileSync）与 WASM 解码错开重叠；
+            //    silk-wasm 每次调用新建实例且同步阻塞事件循环，无 CPU 并行——并发仅获 I/O 重叠收益。
+            //    单条峰值 < 6MB（SILK + PCM + WAV 三段），3 路可控
             const myWxid = this.configService.get('myWxid')
             const candidates = [sessionId]
             if (myWxid && myWxid !== sessionId) candidates.push(myWxid)
 
+            const VOICE_CONCURRENCY = 3
             const total = voiceMessages.length
-            for (let idx = 0; idx < total; idx++) {
-              const { createTime, localId, serverId } = voiceMessages[idx]
-              const fileName = localId > 0 ? `${createTime}_${localId}.wav` : `${createTime}.wav`
-              const df = this.dateFolder(createTime)
-              const dayDir = path.join(voiceOutDir, df)
-              if (!fs.existsSync(dayDir)) fs.mkdirSync(dayDir, { recursive: true })
-              const destPath = path.join(dayDir, fileName)
-
-              // 已存在则跳过
-              if (fs.existsSync(destPath)) {
-                voicePathMap.set(localId, `voices/${df}/${fileName}`)
-                if (!mediaPathMap.has(createTime)) {
-                  mediaPathMap.set(createTime, `voices/${df}/${fileName}`)
-                }
-                continue
-              }
-
-              // 在 MediaDb 中查找 SILK 数据
-              let silkData: Buffer | null = null
-              const targetIdx = sameTimeIndexMap.get(createTime)?.get(localId) ?? 0
-              for (const vdb of voiceDbs) {
+            let done = 0  // 共享完成计数器（JS 单线程，++done 原子，无需锁）
+            for (let start = 0; start < total; start += VOICE_CONCURRENCY) {
+              const slice = voiceMessages.slice(start, start + VOICE_CONCURRENCY)
+              await Promise.all(slice.map((m) => (async () => {
                 try {
-                  // 策略 A: svr_id 精确匹配
-                  if (vdb.svrIdColumn && serverId > 0) {
-                    if (vdb.chatNameIdColumn && vdb.name2IdTable) {
-                      for (const cand of candidates) {
-                        const n2i = await dbAdapter.get<any>(
-                          'message', vdb.dbPath,
-                          `SELECT rowid FROM ${vdb.name2IdTable} WHERE user_name = ?`,
-                          [cand]
-                        )
-                        if (n2i?.rowid) {
+                  const { createTime, localId, serverId } = m
+                  const fileName = localId > 0 ? `${createTime}_${localId}.wav` : `${createTime}.wav`
+                  const df = this.dateFolder(createTime)
+                  const dayDir = path.join(voiceOutDir, df)
+                  if (!fs.existsSync(dayDir)) fs.mkdirSync(dayDir, { recursive: true })
+                  const destPath = path.join(dayDir, fileName)
+
+                  // 已存在则跳过
+                  if (fs.existsSync(destPath)) {
+                    voicePathMap.set(localId, `voices/${df}/${fileName}`)
+                    if (!mediaPathMap.has(createTime)) {
+                      mediaPathMap.set(createTime, `voices/${df}/${fileName}`)
+                    }
+                    return
+                  }
+
+                  // 在 MediaDb 中查找 SILK 数据
+                  let silkData: Buffer | null = null
+                  const targetIdx = sameTimeIndexMap.get(createTime)?.get(localId) ?? 0
+                  for (const vdb of voiceDbs) {
+                    try {
+                      // 策略 A: svr_id 精确匹配
+                      if (vdb.svrIdColumn && serverId > 0) {
+                        if (vdb.chatNameIdColumn && vdb.name2IdTable) {
+                          for (const cand of candidates) {
+                            const n2i = await dbAdapter.get<any>(
+                              'message', vdb.dbPath,
+                              `SELECT rowid FROM ${vdb.name2IdTable} WHERE user_name = ?`,
+                              [cand]
+                            )
+                            if (n2i?.rowid) {
+                              const row = await dbAdapter.get<any>(
+                                'message', vdb.dbPath,
+                                `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.chatNameIdColumn} = ? AND ${vdb.svrIdColumn} = ? LIMIT 1`,
+                                [n2i.rowid, serverId]
+                              )
+                              if (row?.data) {
+                                silkData = this.decodeVoiceBlob(row.data)
+                                if (silkData) break
+                              }
+                            }
+                          }
+                        }
+                        if (!silkData) {
                           const row = await dbAdapter.get<any>(
                             'message', vdb.dbPath,
-                            `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.chatNameIdColumn} = ? AND ${vdb.svrIdColumn} = ? LIMIT 1`,
-                            [n2i.rowid, serverId]
+                            `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.svrIdColumn} = ? LIMIT 1`,
+                            [serverId]
                           )
-                          if (row?.data) {
-                            silkData = this.decodeVoiceBlob(row.data)
+                          if (row?.data) silkData = this.decodeVoiceBlob(row.data)
+                        }
+                      }
+
+                      // 策略 B: chatNameId + createTime 按 rowid 顺序选第 N 条
+                      if (!silkData && vdb.chatNameIdColumn && vdb.name2IdTable) {
+                        for (const cand of candidates) {
+                          const n2i = await dbAdapter.get<any>(
+                            'message', vdb.dbPath,
+                            `SELECT rowid FROM ${vdb.name2IdTable} WHERE user_name = ?`,
+                            [cand]
+                          )
+                          if (!n2i?.rowid) continue
+                          const rows = await dbAdapter.all<any>(
+                            'message', vdb.dbPath,
+                            `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.chatNameIdColumn} = ? AND ${vdb.timeColumn} = ? ORDER BY rowid ASC`,
+                            [n2i.rowid, createTime]
+                          )
+                          if (rows.length === 0) continue
+                          const pick = rows[Math.min(targetIdx, rows.length - 1)]
+                          if (pick?.data) {
+                            silkData = this.decodeVoiceBlob(pick.data)
                             if (silkData) break
                           }
                         }
                       }
-                    }
-                    if (!silkData) {
-                      const row = await dbAdapter.get<any>(
-                        'message', vdb.dbPath,
-                        `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.svrIdColumn} = ? LIMIT 1`,
-                        [serverId]
-                      )
-                      if (row?.data) silkData = this.decodeVoiceBlob(row.data)
-                    }
-                  }
 
-                  // 策略 B: chatNameId + createTime 按 rowid 顺序选第 N 条
-                  if (!silkData && vdb.chatNameIdColumn && vdb.name2IdTable) {
-                    for (const cand of candidates) {
-                      const n2i = await dbAdapter.get<any>(
-                        'message', vdb.dbPath,
-                        `SELECT rowid FROM ${vdb.name2IdTable} WHERE user_name = ?`,
-                        [cand]
-                      )
-                      if (!n2i?.rowid) continue
-                      const rows = await dbAdapter.all<any>(
-                        'message', vdb.dbPath,
-                        `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.chatNameIdColumn} = ? AND ${vdb.timeColumn} = ? ORDER BY rowid ASC`,
-                        [n2i.rowid, createTime]
-                      )
-                      if (rows.length === 0) continue
-                      const pick = rows[Math.min(targetIdx, rows.length - 1)]
-                      if (pick?.data) {
-                        silkData = this.decodeVoiceBlob(pick.data)
-                        if (silkData) break
+                      // 策略 C: 仅 createTime 兜底
+                      if (!silkData) {
+                        const rows = await dbAdapter.all<any>(
+                          'message', vdb.dbPath,
+                          `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.timeColumn} = ? ORDER BY rowid ASC`,
+                          [createTime]
+                        )
+                        if (rows.length > 0) {
+                          const pick = rows[Math.min(targetIdx, rows.length - 1)]
+                          if (pick?.data) silkData = this.decodeVoiceBlob(pick.data)
+                        }
                       }
-                    }
+                      if (silkData) break
+                    } catch { }
                   }
 
-                  // 策略 C: 仅 createTime 兜底
-                  if (!silkData) {
-                    const rows = await dbAdapter.all<any>(
-                      'message', vdb.dbPath,
-                      `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.timeColumn} = ? ORDER BY rowid ASC`,
-                      [createTime]
-                    )
-                    if (rows.length > 0) {
-                      const pick = rows[Math.min(targetIdx, rows.length - 1)]
-                      if (pick?.data) silkData = this.decodeVoiceBlob(pick.data)
+                  if (!silkData) return
+
+                  try {
+                    // SILK → PCM → WAV
+                    const result = await silkWasm.decode(silkData, 24000)
+                    silkData = null // 释放 SILK 数据
+                    if (!result?.data) return
+                    const pcmData = Buffer.from(result.data)
+                    const wavData = this.createWavBuffer(pcmData, 24000)
+                    fs.writeFileSync(destPath, wavData)
+                    voiceCount++
+                    voicePathMap.set(localId, `voices/${df}/${fileName}`)
+                    if (!mediaPathMap.has(createTime)) {
+                      mediaPathMap.set(createTime, `voices/${df}/${fileName}`)
                     }
+                  } catch { }
+                } finally {
+                  // 进度：语音占 [mediaWeight, 1] 区间
+                  // finally 确保跳过/异常也计数，done 单调推进到 total（修复原串行版本跳过项导致进度卡 <100%）
+                  const n = ++done
+                  if (n % 10 === 0 || n === total) {
+                    const voiceFrac = mediaWeight + (total > 0 ? n / total : 1) * (1 - mediaWeight)
+                    onProgress?.(voiceFrac, `语音导出: ${n}/${total}`)
                   }
-                  if (silkData) break
-                } catch { }
-              }
-
-              if (!silkData) continue
-
-              try {
-                // SILK → PCM → WAV（串行，立即释放）
-                const result = await silkWasm.decode(silkData, 24000)
-                silkData = null // 释放 SILK 数据
-                if (!result?.data) continue
-                const pcmData = Buffer.from(result.data)
-                const wavData = this.createWavBuffer(pcmData, 24000)
-                fs.writeFileSync(destPath, wavData)
-                voiceCount++
-                voicePathMap.set(localId, `voices/${df}/${fileName}`)
-                if (!mediaPathMap.has(createTime)) {
-                  mediaPathMap.set(createTime, `voices/${df}/${fileName}`)
                 }
-              } catch { }
-
-              // 进度：语音占 [mediaWeight, 1] 区间
-              if ((idx + 1) % 10 === 0 || idx === total - 1) {
-                const voiceFrac = mediaWeight + (total > 0 ? (idx + 1) / total : 1) * (1 - mediaWeight)
-                onProgress?.(voiceFrac, `语音导出: ${idx + 1}/${total}`)
-              }
+              })()))
             }
 
             // 6. dbAdapter 无持久 handle，无需关闭
