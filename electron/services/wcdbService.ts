@@ -184,7 +184,7 @@ export class WcdbService extends EventEmitter {
     kind: string,
     path: string,
     tableName: string,
-    opts: { afterRid: number; maxRows?: number; startTime?: number; endTime?: number }
+    opts: { afterRid: number; maxRows?: number; startTime?: number; endTime?: number; extraCols?: string[] }
   ): Promise<{ success: boolean; rows?: any[]; lastRid?: number; done?: boolean; error?: string }> {
     return this.callWithAutoOpen('readMessageChunk', { kind, path, tableName, opts })
   }
