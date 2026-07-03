@@ -123,6 +123,45 @@ function verifyImageNativePacked(context) {
     );
 }
 
+// 构建期硬闸：sharp 的 libvips 动态库必须打进包，否则让构建失败。
+// 背景：build.files 里全局的 !**/*.dylib 曾把 @img/sharp-libvips-darwin-arm64 的 dylib 剥掉，
+// mac 发布版启动即主进程崩溃（sharp ERR_DLOPEN_FAILED）。平台瘦身规则只能放 win/mac 各自的 files 下。
+function verifySharpVipsPacked(context) {
+    const platform = context.electronPlatformName;
+    const arch = resolveNativeArch(context.arch);
+    // mac 的 libvips 在独立的 sharp-libvips 包；win 的 libvips dll 与 .node 同包
+    const pkg = platform === 'darwin' ? `sharp-libvips-darwin-${arch}`
+        : platform === 'win32' ? `sharp-win32-${arch}` : null;
+    if (!pkg) return;
+
+    const sourceLib = path.join(__dirname, '..', 'node_modules', '@img', pkg, 'lib');
+    if (!fs.existsSync(sourceLib)) {
+        console.log(`[afterPack] 源码无 @img/${pkg}，跳过 sharp libvips 打包校验`);
+        return;
+    }
+
+    const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';
+    const resourceRoots = uniqueExistingDirs([
+        path.join(context.appOutDir, 'resources'),
+        path.join(context.appOutDir, 'Contents', 'Resources'),
+        path.join(context.appOutDir, `${productName}.app`, 'Contents', 'Resources')
+    ]);
+
+    for (const resourceRoot of resourceRoots) {
+        const libDir = path.join(resourceRoot, 'app.asar.unpacked', 'node_modules', '@img', pkg, 'lib');
+        if (fs.existsSync(libDir) && fs.readdirSync(libDir).some((f) => f.startsWith('libvips'))) {
+            console.log(`[afterPack] sharp libvips 已打包: ${libDir}`);
+            return;
+        }
+    }
+
+    throw new Error(
+        `[afterPack] sharp 的 libvips 库未打进发布包：期望 app.asar.unpacked/node_modules/@img/${pkg}/lib/ 下有 libvips*。` +
+        `多半是 build.files 的平台排除规则误伤（历史上全局 !**/*.dylib 剥掉过 mac 的 dylib）。` +
+        `平台专用排除必须放在 win.files / mac.files 下，修正后重新打包。`
+    );
+}
+
 exports.default = async function (context) {
     // context.appOutDir 是打包后的临时解压目录
     const localesDir = path.join(context.appOutDir, 'locales');
@@ -150,6 +189,8 @@ exports.default = async function (context) {
     pruneImageNativeAddons(context);
 
     verifyImageNativePacked(context);
+
+    verifySharpVipsPacked(context);
 
     if (context.electronPlatformName === 'darwin') {
         const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';

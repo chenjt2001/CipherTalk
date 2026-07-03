@@ -150,7 +150,13 @@
     "win": {
       "icon": "public/icon.ico",
       "target": "nsis",
-      "requestedExecutionLevel": "asInvoker"
+      "requestedExecutionLevel": "asInvoker",
+      "files": [
+        "!node_modules/**/{darwin,mac}/**/*",
+        "!node_modules/**/*.dylib",
+        "!node_modules/sherpa-onnx-node/bin/!(win-x64)/**/*",
+        "!node_modules/ffmpeg-static/bin/!(win32-x64)/**/*"
+      ]
     },
     "mac": {
       "icon": "public/icon.icns",
@@ -245,12 +251,9 @@
       "!node_modules/**/{demo,demos}/**/*",
       "!node_modules/.vite/**/*",
       "!node_modules/onnxruntime-web/**/*",
-      "!node_modules/**/{linux,darwin,mac,android,ios,armhf,armv7l,ia32,wasm}/**/*",
+      "!node_modules/**/{linux,android,ios,armhf,armv7l,ia32,wasm}/**/*",
       "!node_modules/**/*.so",
-      "!node_modules/**/*.dylib",
       "!node_modules/**/*.a",
-      "!node_modules/sherpa-onnx-node/bin/!(win-x64)/**/*",
-      "!node_modules/ffmpeg-static/bin/!(win32-x64)/**/*",
       "!node_modules/**/*.obj",
       "!node_modules/**/*.pdb",
       "!node_modules/**/*.lib",
