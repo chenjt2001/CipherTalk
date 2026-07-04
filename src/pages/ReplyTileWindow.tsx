@@ -32,6 +32,7 @@ export default function ReplyTileWindow() {
   const selectedRef = useRef<string | null>(null)
   selectedRef.current = selected
   const [copied, setCopied] = useState<string | null>(null)
+  const [retrying, setRetrying] = useState<string | null>(null)
 
   useEffect(() => {
     const root = document.getElementById('root')
@@ -55,6 +56,9 @@ export default function ReplyTileWindow() {
         if (selectedRef.current === entry.sessionId) setSelected(null)
       } else {
         map.set(entry.sessionId, entry)
+        if (entry.state === 'ready' || entry.state === 'error') setRetrying((value) => (
+          value?.startsWith(`${entry.sessionId}:`) ? null : value
+        ))
         // 新一轮生成/新建议时自动切到该会话；用户手动切走后，下次有新活动再跟随
         if (entry.state === 'loading' || entry.state === 'ready') setSelected(entry.sessionId)
         else if (selectedRef.current === null) setSelected(entry.sessionId)
@@ -85,6 +89,11 @@ export default function ReplyTileWindow() {
 
   const handleSkip = (sessionId: string) => {
     window.electronAPI.window.replyTile.skip(sessionId)
+  }
+
+  const handleRetry = (sessionId: string, batchId: string, suggestionIndex: number) => {
+    setRetrying(`${sessionId}:${batchId}:${suggestionIndex}`)
+    window.electronAPI.window.replyTile.retry({ sessionId, batchId, suggestionIndex })
   }
 
   const entries = Array.from(entriesRef.current.values())
@@ -132,6 +141,16 @@ export default function ReplyTileWindow() {
                   const segs = splitSuggestionBursts(text)
                   return (
                     <div className="reply-tile__card" key={`${batch.id}:${index}:${text}`}>
+                      <button
+                        className="reply-tile__retry"
+                        disabled={Boolean(retrying)}
+                        type="button"
+                        title="重试这条建议"
+                        onClick={() => current && handleRetry(current.sessionId, batch.id, index)}
+                      >
+                        <CircleDashed width={12} height={12} className={retrying === `${current?.sessionId}:${batch.id}:${index}` ? 'animate-spin' : ''} />
+                        <span>重试</span>
+                      </button>
                       {segs.map((seg, segIndex) => {
                         const tag = `${current?.sessionId}:${batch.id}:${index}:${segIndex}`
                         const label = sentenceSegmentLabel(segIndex)

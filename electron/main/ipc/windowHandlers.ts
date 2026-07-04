@@ -175,6 +175,11 @@ export function registerWindowHandlers(ctx: MainProcessContext): void {
     ctx.broadcastToWindows('reply-tile:skip', sessionId)
   })
 
+  ipcMain.on('reply-tile:retry', (_event, payload: { sessionId: string; batchId: string; suggestionIndex: number }) => {
+    replyTileService.retrySuggestion(payload.sessionId, payload.batchId, payload.suggestionIndex)
+    ctx.broadcastToWindows('reply-tile:retry', payload)
+  })
+
   ipcMain.handle('window:setReplyTileEnabled', (_event, enabled: boolean) => {
     const on = Boolean(enabled)
     ctx.getConfigService()?.set('replyTileEnabled', on)

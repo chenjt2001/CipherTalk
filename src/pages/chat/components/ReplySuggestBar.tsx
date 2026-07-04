@@ -31,6 +31,11 @@ type ReplySuggestBatch = {
   suggestions: string[]
 }
 
+type ReplaceSuggestionTarget = {
+  batchId: string
+  suggestionIndex: number
+}
+
 function quoteFromLastIncoming(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i]
@@ -124,6 +129,7 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
   const loadingRef = useRef(false)
   const sessionRef = useRef(session.username)
   const [pendingContinueKey, setPendingContinueKey] = useState<string | null>(null)
+  const [retryingSuggestion, setRetryingSuggestion] = useState<string | null>(null)
   sessionRef.current = session.username
 
   // 会话级设置：加载 + 跟随 config 变更（ChatHeader 下拉里改动后这里立即生效）
@@ -159,17 +165,24 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
     }
   }, [settings])
 
-  const generate = useCallback(async (current: ReplySuggestSettings, targetKey: string, targetQuote: string) => {
+  const generate = useCallback(async (
+    current: ReplySuggestSettings,
+    targetKey: string,
+    targetQuote: string,
+    options?: { count?: number; replace?: ReplaceSuggestionTarget; retryKey?: string },
+  ) => {
     if (loadingRef.current) {
-      setPendingContinueKey(targetKey)
+      if (!options?.replace) setPendingContinueKey(targetKey)
       return
     }
     const username = sessionRef.current
     const runSeq = runSeqRef.current
+    const replacing = Boolean(options?.replace)
     loadingRef.current = true
-    setLoading(true)
+    if (options?.retryKey) setRetryingSuggestion(options.retryKey)
+    if (!replacing) setLoading(true)
     setError(null)
-    setPendingContinueKey(null)
+    if (!replacing) setPendingContinueKey(null)
     try {
       // 自画像：likeme 用画像卡做模仿；其它风格也拿它的连发/字数统计做连发自适应
       const myPersona = await loadMyPersona(session.username)
@@ -207,7 +220,7 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
         sessionId: session.username,
         context,
         style: current.style,
-        count: current.count,
+        count: options?.count ?? current.count,
         deep: current.deep,
         myRecentTexts,
         myPersonaContext,
@@ -223,7 +236,20 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
         console.log(
           `[ReplySuggest] 生成完成：${res.suggestions.length} 条建议，实际附图 ${res.imagesAttached ?? 0} 张，模型图像输入=${vision}`,
         )
-        setBatches((prev) => [...prev, { id: nanoid(8), targetKey, quote: targetQuote, suggestions: res.suggestions || [] }])
+        if (options?.replace) {
+          const replacement = res.suggestions[0]
+          setBatches((prev) => prev.map((batch) => {
+            if (batch.id !== options.replace!.batchId) return batch
+            return {
+              ...batch,
+              suggestions: batch.suggestions.map((suggestion, index) => (
+                index === options.replace!.suggestionIndex ? replacement : suggestion
+              )),
+            }
+          }))
+        } else {
+          setBatches((prev) => [...prev, { id: nanoid(8), targetKey, quote: targetQuote, suggestions: res.suggestions || [] }])
+        }
         setPendingContinueKey(latestTargetKeyRef.current && latestTargetKeyRef.current !== targetKey ? latestTargetKeyRef.current : null)
       } else if (!res.success) {
         console.warn('[ReplySuggest] 生成失败:', res.error)
@@ -237,7 +263,8 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
     } finally {
       if (sessionRef.current === username && runSeqRef.current === runSeq) {
         loadingRef.current = false
-        setLoading(false)
+        if (!replacing) setLoading(false)
+        if (options?.retryKey) setRetryingSuggestion(null)
       }
     }
     // messages 刻意不进依赖：generate 只在触发定时器到点时调用，用当时闭包里的列表即可
@@ -320,6 +347,16 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
     if (settings && targetKey) void generate(settings, targetKey, quoteFromLastIncoming(messages))
   }, [settings, generate, messages])
 
+  const handleRetrySuggestion = useCallback((batch: ReplySuggestBatch, suggestionIndex: number) => {
+    if (!settings) return
+    const retryKey = `${batch.id}:${suggestionIndex}`
+    void generate(settings, batch.targetKey, batch.quote, {
+      count: 1,
+      replace: { batchId: batch.id, suggestionIndex },
+      retryKey,
+    })
+  }, [settings, generate])
+
   const handleContinue = useCallback(() => {
     const targetKey = pendingContinueKey || latestTargetKeyRef.current
     if (!settings || !targetKey) return
@@ -339,11 +376,18 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
     const offSkip = window.electronAPI.window.replyTile.onSkip((sessionId) => {
       if (sessionId === session.username) handleSkipContinue()
     })
+    const offRetry = window.electronAPI.window.replyTile.onRetry((payload) => {
+      if (payload.sessionId !== session.username) return
+      const batch = batches.find((item) => item.id === payload.batchId)
+      if (!batch) return
+      handleRetrySuggestion(batch, payload.suggestionIndex)
+    })
     return () => {
       offContinue()
       offSkip()
+      offRetry()
     }
-  }, [session.username, handleContinue, handleSkipContinue])
+  }, [session.username, handleContinue, handleSkipContinue, handleRetrySuggestion, batches])
 
   if (!settings?.enabled) return null
   if (!loading && !error && batches.length === 0 && !pendingContinueKey) return null
@@ -361,6 +405,17 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
                     const segs = splitSuggestionBursts(text)
                     return (
                       <GlassShell className="reply-suggest-bar__card" key={`${batch.id}:${index}:${text}`}>
+                        <button
+                          aria-label="重试这条建议"
+                          className="reply-suggest-bar__card-retry"
+                          disabled={Boolean(retryingSuggestion)}
+                          title="重试这条建议"
+                          type="button"
+                          onClick={() => handleRetrySuggestion(batch, index)}
+                        >
+                          <CircleDashed width={12} height={12} className={retryingSuggestion === `${batch.id}:${index}` ? 'animate-spin' : ''} />
+                          <span>重试</span>
+                        </button>
                         {segs.map((seg, segIndex) => {
                           const label = sentenceSegmentLabel(segIndex)
                           return (
