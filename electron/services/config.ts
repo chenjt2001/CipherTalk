@@ -229,6 +229,8 @@ interface ConfigSchema {
   }>
   // 消息提醒：开启了"新消息提醒"的私聊会话用户名列表（默认全关，空数组）
   notifySessions: string[]
+  replyTileEnabled: boolean
+  replySuggestSessions: Record<string, { enabled?: boolean; tile?: boolean; style?: string; count?: number; deep?: boolean }>
   mcpEnabled: boolean
   mcpExposeMediaPaths: boolean
   mcpProxyPort: number
@@ -382,6 +384,8 @@ const defaults: ConfigSchema = {
   petDailySummaryDate: '',
   petReminders: [],
   notifySessions: [],
+  replyTileEnabled: false,
+  replySuggestSessions: {},
   mcpEnabled: false,
   mcpExposeMediaPaths: true,
   mcpProxyPort: 5032,

@@ -14,6 +14,7 @@ import {
   getReplySuggestSettings,
   loadFriendPersona,
   loadMyPersona,
+  sentenceSegmentLabel,
   splitSuggestionBursts,
 } from '../replySuggest'
 import { useTopToast } from '../hooks/useTopToast'
@@ -21,6 +22,24 @@ import { useTopToast } from '../hooks/useTopToast'
 const QUIET_MS = 5000
 // 只对"刚收到"的对方消息生成建议：超过这个时长的老消息（比如翻历史、切进老会话）不触发
 const FRESH_SECONDS = 10 * 60
+
+
+type ReplySuggestBatch = {
+  id: string
+  targetKey: string
+  quote: string
+  suggestions: string[]
+}
+
+function quoteFromLastIncoming(messages: Message[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i]
+    if (m.isSend === 1) continue
+    const text = m.parsedContent?.trim()
+    if (text) return text.slice(0, 120)
+  }
+  return '最新一条消息'
+}
 
 // 液态玻璃折射贴图参数：卡片/胶囊是圆角矩形（气泡同款），关闭按钮是圆形（与朋友圈/Agent 按钮同参）
 const GLASS_RECT: GlassShapeOptions = { halfX: 0.22, halfY: 0.14, radius: 0.7, edge: 0.2, feather: 1.2, strength: 1.6 }
@@ -93,7 +112,7 @@ function GlassShell({ as: Tag = 'div', shape = GLASS_RECT, children, style: _ign
  */
 export function ReplySuggestBar({ session, messages }: { session: ChatSession; messages: Message[] }) {
   const [settings, setSettings] = useState<ReplySuggestSettings | null>(null)
-  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [batches, setBatches] = useState<ReplySuggestBatch[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { showTopToast } = useTopToast()
@@ -101,12 +120,17 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
   const handledKeyRef = useRef<string | null>(null)
   // 生成代次：我发出新消息后 +1，作废还在飞的旧生成结果
   const runSeqRef = useRef(0)
+  const latestTargetKeyRef = useRef<string | null>(null)
+  const loadingRef = useRef(false)
   const sessionRef = useRef(session.username)
+  const [pendingContinueKey, setPendingContinueKey] = useState<string | null>(null)
   sessionRef.current = session.username
 
   // 会话级设置：加载 + 跟随 config 变更（ChatHeader 下拉里改动后这里立即生效）
   useEffect(() => {
     let cancelled = false
+    // 等当前会话配置加载完成后再镜像到共享磁贴，避免沿用上一会话设置。
+    setSettings(null)
     void getReplySuggestSettings(session.username).then((s) => {
       if (!cancelled) setSettings(s)
     })
@@ -121,23 +145,31 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
 
   // 切会话/关闭功能：清空现有建议
   useEffect(() => {
-    setSuggestions([])
+    setBatches([])
+    setPendingContinueKey(null)
     setError(null)
     handledKeyRef.current = null
   }, [session.username])
 
   useEffect(() => {
     if (settings && !settings.enabled) {
-      setSuggestions([])
+      setBatches([])
+      setPendingContinueKey(null)
       setError(null)
     }
   }, [settings])
 
-  const generate = useCallback(async (current: ReplySuggestSettings) => {
+  const generate = useCallback(async (current: ReplySuggestSettings, targetKey: string, targetQuote: string) => {
+    if (loadingRef.current) {
+      setPendingContinueKey(targetKey)
+      return
+    }
     const username = sessionRef.current
     const runSeq = runSeqRef.current
+    loadingRef.current = true
     setLoading(true)
     setError(null)
+    setPendingContinueKey(null)
     try {
       // 自画像：likeme 用画像卡做模仿；其它风格也拿它的连发/字数统计做连发自适应
       const myPersona = await loadMyPersona(session.username)
@@ -183,14 +215,16 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
         friendPersonaContext,
         images: images.length > 0 ? images : undefined,
       })
-      // 生成期间切走了会话、或我已经自己回过了，丢弃结果
+      // Drop only if the session changed or I already replied.
+      // If the other side sends more messages, keep this result and ask whether to continue.
       if (sessionRef.current !== username || runSeqRef.current !== runSeq) return
       if (res.success && res.suggestions?.length) {
         const vision = res.visionSupport === undefined ? '未知(按可尝试处理)' : res.visionSupport ? '支持' : '不支持'
         console.log(
           `[ReplySuggest] 生成完成：${res.suggestions.length} 条建议，实际附图 ${res.imagesAttached ?? 0} 张，模型图像输入=${vision}`,
         )
-        setSuggestions(res.suggestions)
+        setBatches((prev) => [...prev, { id: nanoid(8), targetKey, quote: targetQuote, suggestions: res.suggestions || [] }])
+        setPendingContinueKey(latestTargetKeyRef.current && latestTargetKeyRef.current !== targetKey ? latestTargetKeyRef.current : null)
       } else if (!res.success) {
         console.warn('[ReplySuggest] 生成失败:', res.error)
         setError(res.error || '生成失败')
@@ -201,7 +235,10 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
         setError(e instanceof Error ? e.message : String(e))
       }
     } finally {
-      setLoading(false)
+      if (sessionRef.current === username && runSeqRef.current === runSeq) {
+        loadingRef.current = false
+        setLoading(false)
+      }
     }
     // messages 刻意不进依赖：generate 只在触发定时器到点时调用，用当时闭包里的列表即可
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -215,101 +252,176 @@ export function ReplySuggestBar({ session, messages }: { session: ChatSession; m
     if (!last || !last.parsedContent?.trim()) return
     if (last.isSend === 1) {
       // 我已经回过了：作废还在飞的生成，清掉残留建议
+      latestTargetKeyRef.current = null
+      loadingRef.current = false
       runSeqRef.current += 1
-      setSuggestions([])
+      setBatches([])
+      setPendingContinueKey(null)
       setError(null)
+      setLoading(false)
       return
     }
     // 老消息不触发：翻历史/切进最后一条是很久前的会话，不该冒建议
     if (Date.now() / 1000 - last.createTime > FRESH_SECONDS) return
     const key = `${session.username}:${last.localId}:${last.createTime}`
+    const quote = last.parsedContent.trim().slice(0, 120)
+    if (key !== latestTargetKeyRef.current) {
+      latestTargetKeyRef.current = key
+      if (loadingRef.current || pendingContinueKey) {
+        setPendingContinueKey(key)
+        return
+      }
+    }
+    if (loadingRef.current || pendingContinueKey) return
     if (key === handledKeyRef.current) return
-    // 有新消息进来，旧建议已过时
-    setSuggestions([])
     setError(null)
     const timer = setTimeout(() => {
+      if (latestTargetKeyRef.current !== key || loadingRef.current) return
       handledKeyRef.current = key
-      void generate(settings)
+      void generate(settings, key, quote)
     }, QUIET_MS)
     return () => clearTimeout(timer)
-  }, [messages, settings, session.username, generate])
+  }, [messages, settings, session.username, generate, pendingContinueKey])
 
-  // seq/total：连发建议逐条复制时提示第几条，单条时 seq 传 0
-  const handleCopy = useCallback((text: string, seq = 0, total = 1) => {
+  // 当前会话的建议镜像进磁贴（全保真：图片/画像/语音转写都已算进来）。非当前会话由主进程后台生成。
+  // 只有配置加载完成且明确不参与时才推 gone，避免切会话/配置加载瞬间误删其它参与会话。
+  useEffect(() => {
+    if (!settings) return
+    const sessionId = session.username
+    const sessionName = session.displayName || session.username
+    const avatarUrl = session.avatarUrl
+    if (!settings.enabled || !settings.tile) {
+      window.electronAPI.window.replyTile.push({ sessionId, sessionName, avatarUrl, state: 'gone' })
+      return
+    }
+    const suggestions = batches.flatMap((b) => b.suggestions)
+    const state = loading ? 'loading' : error ? 'error' : batches.length ? 'ready' : 'pending'
+    window.electronAPI.window.replyTile.push({
+      sessionId,
+      sessionName,
+      avatarUrl,
+      state,
+      suggestions,
+      batches,
+      pendingContinue: Boolean(pendingContinueKey && !loading),
+      error: error || undefined,
+    })
+  }, [settings, loading, error, batches, pendingContinueKey, session.avatarUrl, session.displayName, session.username])
+
+  const handleCopy = useCallback((text: string, label?: string) => {
     void navigator.clipboard.writeText(text)
-      .then(() => showTopToast(seq > 0 ? `已复制第 ${seq}/${total} 条，逐条粘贴发送` : '已复制，去微信粘贴发送'))
+      .then(() => showTopToast(label ? `已复制${label}，逐条粘贴发送` : '已复制，去微信粘贴发送'))
       .catch(() => showTopToast('复制失败', false))
   }, [showTopToast])
 
   const handleRetry = useCallback(() => {
     setError(null)
-    if (settings) void generate(settings)
-  }, [settings, generate])
+    const targetKey = latestTargetKeyRef.current
+    if (settings && targetKey) void generate(settings, targetKey, quoteFromLastIncoming(messages))
+  }, [settings, generate, messages])
+
+  const handleContinue = useCallback(() => {
+    const targetKey = pendingContinueKey || latestTargetKeyRef.current
+    if (!settings || !targetKey) return
+    handledKeyRef.current = targetKey
+    void generate(settings, targetKey, quoteFromLastIncoming(messages))
+  }, [settings, pendingContinueKey, generate, messages])
+
+  const handleSkipContinue = useCallback(() => {
+    if (pendingContinueKey) handledKeyRef.current = pendingContinueKey
+    setPendingContinueKey(null)
+  }, [pendingContinueKey])
+
+  useEffect(() => {
+    const offContinue = window.electronAPI.window.replyTile.onContinue((sessionId) => {
+      if (sessionId === session.username) handleContinue()
+    })
+    const offSkip = window.electronAPI.window.replyTile.onSkip((sessionId) => {
+      if (sessionId === session.username) handleSkipContinue()
+    })
+    return () => {
+      offContinue()
+      offSkip()
+    }
+  }, [session.username, handleContinue, handleSkipContinue])
 
   if (!settings?.enabled) return null
-  if (!loading && !error && suggestions.length === 0) return null
+  if (!loading && !error && batches.length === 0 && !pendingContinueKey) return null
 
   return (
     <div className="reply-suggest-bar" aria-live="polite">
-      {loading ? (
-        <GlassShell className="reply-suggest-bar__loading">
-          <CircleDashed width={14} height={14} className="animate-spin" />
-          <span>正在生成回复建议…</span>
-        </GlassShell>
-      ) : error ? (
-        <>
-          <GlassShell className="reply-suggest-bar__error" title={error}>
-            <span>建议生成失败</span>
-            <button className="reply-suggest-bar__retry" type="button" onClick={handleRetry}>
-              重试
-            </button>
-          </GlassShell>
-          <GlassShell
-            as="button"
-            aria-label="关闭提示"
-            className="reply-suggest-bar__close"
-            shape={GLASS_CIRCLE}
-            type="button"
-            onClick={() => setError(null)}
-          >
-            <Xmark width={14} height={14} />
-          </GlassShell>
-        </>
-      ) : (
-        <>
-          <div className="reply-suggest-bar__cards">
-            {suggestions.map((text, index) => {
-              const segs = splitSuggestionBursts(text)
-              return (
-                <GlassShell className="reply-suggest-bar__card" key={`${index}:${text}`}>
-                  {segs.map((seg, segIndex) => (
-                    <button
-                      className="reply-suggest-bar__seg"
-                      key={`${segIndex}:${seg}`}
-                      title={segs.length > 1 ? `点击复制第 ${segIndex + 1}/${segs.length} 条` : '点击复制'}
-                      type="button"
-                      onClick={() => handleCopy(seg, segs.length > 1 ? segIndex + 1 : 0, segs.length)}
-                    >
-                      {segs.length > 1 && <span className="reply-suggest-bar__seg-index">{segIndex + 1}</span>}
-                      <span className="reply-suggest-bar__seg-text">{seg}</span>
-                    </button>
-                  ))}
-                </GlassShell>
-              )
-            })}
+      <div className="reply-suggest-bar__stack">
+        {batches.length > 0 && (
+          <div className="reply-suggest-bar__batches">
+            {batches.map((batch) => (
+              <div className="reply-suggest-bar__batch" key={batch.id}>
+                <div className="reply-suggest-bar__quote">针对：{batch.quote}</div>
+                <div className="reply-suggest-bar__cards">
+                  {batch.suggestions.map((text, index) => {
+                    const segs = splitSuggestionBursts(text)
+                    return (
+                      <GlassShell className="reply-suggest-bar__card" key={`${batch.id}:${index}:${text}`}>
+                        {segs.map((seg, segIndex) => {
+                          const label = sentenceSegmentLabel(segIndex)
+                          return (
+                            <button
+                              className="reply-suggest-bar__seg"
+                              key={`${segIndex}:${seg}`}
+                              title={segs.length > 1 ? `点击复制${label}` : '点击复制'}
+                              type="button"
+                              onClick={() => handleCopy(seg, segs.length > 1 ? label : undefined)}
+                            >
+                              {segs.length > 1 && <span className="reply-suggest-bar__seg-index">{label}</span>}
+                              <span className="reply-suggest-bar__seg-text">{seg}</span>
+                            </button>
+                          )
+                        })}
+                      </GlassShell>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
-          <GlassShell
-            as="button"
-            aria-label="关闭建议"
-            className="reply-suggest-bar__close"
-            shape={GLASS_CIRCLE}
-            type="button"
-            onClick={() => setSuggestions([])}
-          >
-            <Xmark width={14} height={14} />
+        )}
+
+        {loading && (
+          <GlassShell className="reply-suggest-bar__loading">
+            <CircleDashed width={14} height={14} className="animate-spin" />
+            <span>正在生成回复建议…</span>
           </GlassShell>
-        </>
-      )}
+        )}
+
+        {!loading && pendingContinueKey && (
+          <GlassShell className="reply-suggest-bar__continue">
+            <span>生成期间收到了新消息，是否继续生成？</span>
+            <button className="reply-suggest-bar__retry" type="button" onClick={handleContinue}>继续</button>
+            <button className="reply-suggest-bar__retry" type="button" onClick={handleSkipContinue}>暂不</button>
+          </GlassShell>
+        )}
+
+        {!loading && error && (
+          <GlassShell className="reply-suggest-bar__error" title={error}>
+            <span>生成失败</span>
+            <button className="reply-suggest-bar__retry" type="button" onClick={handleRetry}>重试</button>
+          </GlassShell>
+        )}
+      </div>
+
+      <GlassShell
+        as="button"
+        aria-label="关闭回复建议"
+        className="reply-suggest-bar__close"
+        shape={GLASS_CIRCLE}
+        type="button"
+        onClick={() => {
+          setBatches([])
+          setError(null)
+          setPendingContinueKey(null)
+        }}
+      >
+        <Xmark width={14} height={14} />
+      </GlassShell>
     </div>
   )
 }

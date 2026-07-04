@@ -75,6 +75,10 @@ class ChatService extends EventEmitter {
     this.state.currentSessionId = sessionId
   }
 
+  getCurrentSessionId(): string | null {
+    return this.state.currentSessionId
+  }
+
   /**
    * 启动屏预加载：DB 连接成功后在后台预热会话列表、联系人和前几个会话的消息。
    * startup.ts 通过 Promise.race 加 5s 超时调用此方法，保证不会无限阻塞启动屏。

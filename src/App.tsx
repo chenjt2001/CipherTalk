@@ -29,6 +29,7 @@ import ChatHistoryPage from './pages/ChatHistoryPage'
 import PersonaChatPage from './pages/PersonaChatPage'
 import MomentsWindow from './pages/MomentsWindow'
 import PetWindow from './pages/PetWindow'
+import ReplyTileWindow from './pages/ReplyTileWindow'
 import PetsPage from './pages/PetsPage'
 import PluginViewPage from './features/plugins/PluginViewPage'
 import PluginHost from './features/plugins/PluginHost'
@@ -437,7 +438,7 @@ function App() {
   // 启动时自动检查配置并连接数据库
   useEffect(() => {
     // 独立窗口不需要自动连接主数据库
-    if (isChatWindow || isMomentsWindow || isAgreementWindow || isWelcomeWindow || isPosterStyleWindow || location.pathname === '/image-viewer-window' || location.pathname === '/pet-window') return
+    if (isChatWindow || isMomentsWindow || isAgreementWindow || isWelcomeWindow || isPosterStyleWindow || location.pathname === '/image-viewer-window' || location.pathname === '/pet-window' || location.pathname === '/reply-tile-window') return
 
     const autoConnect = async () => {
       try {
@@ -563,6 +564,11 @@ function App() {
   // 桌面悬浮桌宠窗口
   if (location.pathname === '/pet-window') {
     return <PetWindow />
+  }
+
+  // 回复建议磁贴窗口（贴微信右侧/左侧）
+  if (location.pathname === '/reply-tile-window') {
+    return <ReplyTileWindow />
   }
 
   // 独立协议窗口

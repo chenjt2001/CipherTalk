@@ -35,7 +35,7 @@ import type { AgentConversationUpdatedEvent, PersonaBuildProgressInfo, PersonaRe
 type Phase = 'loading' | 'confirm' | 'building' | 'chat'
 
 /** 历史对话记录（含微信分身归档）：listConversations 返回的会话元数据子集。 */
-type PersonaConversationRecord = { id: number; title: string; source: string; updatedAt: number; scope?: unknown }
+type PersonaConversationRecord = { id: number; title: string; source?: string; externalId?: string | null; updatedAt: number; scope?: unknown }
 type PersonaLoadedConversation = PersonaConversationRecord & { messages: UIMessage[] }
 
 type PersonaChatPageProps = {
@@ -147,6 +147,20 @@ const VOICE_MARKER_RE = /^[\[【]\s*(?:语音|voice)\s*[\]】]\s*/i
 const STICKER_BUBBLE_PREFIX = '[表情包]'
 const INITIAL_RENDERED_MESSAGE_COUNT = 80
 const RENDERED_MESSAGE_BATCH_SIZE = 80
+
+function wechatPushBubblesFromMessage(message: UIMessage): string[] {
+  return messageTextParts(message)
+    .map((text) => text.trim())
+    .filter((text) => text && !text.startsWith(STICKER_BUBBLE_PREFIX))
+    .map((text) => text.replace(VOICE_MARKER_RE, '').trim())
+    .filter(Boolean)
+}
+
+function assistantMessageIds(messages: UIMessage[]): string[] {
+  return messages
+    .filter((message) => message.role === 'assistant' && typeof message.id === 'string' && message.id.trim())
+    .map((message) => message.id)
+}
 
 interface PersonaStickerData {
   cdnUrl?: string
@@ -396,9 +410,18 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
   const conversationIdRef = useRef<number | null>(null)
   const conversationUpdatedAtRef = useRef(0)
   const pendingConversationReloadRef = useRef<number | null>(null)
+  const conversationSourceRef = useRef('')
+  const wechatKnownAssistantMessageIdsRef = useRef<Set<string>>(new Set())
+  const wechatPushPendingMessageIdsRef = useRef<Set<string>>(new Set())
   const clientIdRef = useRef(`persona-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const busyRef = useRef(false)
   const historyOpenRef = useRef(false)
+
+  const resetWechatPushState = () => {
+    conversationSourceRef.current = ''
+    wechatKnownAssistantMessageIdsRef.current = new Set()
+    wechatPushPendingMessageIdsRef.current = new Set()
+  }
 
   const transport = useMemo(() => new PersonaChatTransport(() => sessionId), [sessionId])
   const { messages, sendMessage, setMessages, status, stop, error } = useChat({ transport, experimental_throttle: 50 })
@@ -510,6 +533,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     conversationIdRef.current = null
     conversationUpdatedAtRef.current = 0
     pendingConversationReloadRef.current = null
+    resetWechatPushState()
     setDisplayName('')
     setAvatarUrl(undefined)
     setMyAvatarUrl(undefined)
@@ -615,6 +639,9 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     setConversationId(id)
     conversationIdRef.current = id
     conversationUpdatedAtRef.current = Number(conv.updatedAt || Date.now())
+    conversationSourceRef.current = String(conv.source || '')
+    wechatKnownAssistantMessageIdsRef.current = new Set(assistantMessageIds(nextMessages))
+    wechatPushPendingMessageIdsRef.current = new Set()
     lastSavedCountRef.current = nextMessages.length
     pendingConversationReloadRef.current = null
     setPlayedVoice(new Set())
@@ -739,6 +766,16 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     if (messages.length === lastSavedCountRef.current) return
     lastSavedCountRef.current = messages.length
     const baseUpdatedAt = conversationUpdatedAtRef.current
+    const shouldPushToWechat = conversationSourceRef.current === 'wechat' || conversationSourceRef.current === 'wechat-persona'
+    const wechatPushes = shouldPushToWechat
+      ? messages
+        .filter((message) => message.role === 'assistant' && typeof message.id === 'string' && message.id.trim())
+        .filter((message) => !wechatKnownAssistantMessageIdsRef.current.has(message.id) && !wechatPushPendingMessageIdsRef.current.has(message.id))
+        .map((message) => ({ messageId: message.id, bubbles: wechatPushBubblesFromMessage(message) }))
+        .filter((item) => item.bubbles.length > 0)
+      : []
+    for (const item of wechatPushes) wechatPushPendingMessageIdsRef.current.add(item.messageId)
+
     void window.electronAPI.agent.saveConversationMessages({
       id: conversationId,
       messages,
@@ -749,11 +786,34 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
       .then(async (result: any) => {
         if (result?.success && result.conversation) {
           conversationUpdatedAtRef.current = Number(result.conversation.updatedAt || conversationUpdatedAtRef.current)
+          for (const item of wechatPushes) {
+            try {
+              const pushResult = await window.electronAPI.agent.sendConversationReplyToWechat({
+                conversationId,
+                messageId: item.messageId,
+                bubbles: item.bubbles,
+              })
+              if (!pushResult.success) {
+                console.warn('[PersonaChat] failed to push reply to WeChat bot', pushResult.error)
+              } else {
+                wechatKnownAssistantMessageIdsRef.current.add(item.messageId)
+              }
+            } catch (pushError) {
+              console.warn('[PersonaChat] error while pushing reply to WeChat bot', pushError)
+            } finally {
+              wechatPushPendingMessageIdsRef.current.delete(item.messageId)
+            }
+          }
           if (result.staleMerged) await loadConversationIntoState(conversationId)
+        } else {
+          for (const item of wechatPushes) wechatPushPendingMessageIdsRef.current.delete(item.messageId)
         }
         return window.electronAPI.persona.reflect({ sessionId, conversationId })
       })
-      .catch(() => { /* 保存失败不打断聊天 */ })
+      .catch(() => {
+        for (const item of wechatPushes) wechatPushPendingMessageIdsRef.current.delete(item.messageId)
+        /* save failure should not interrupt chat */
+      })
   }, [status, conversationId, messages, sessionId, loadConversationIntoState])
 
   useEffect(() => {
@@ -772,6 +832,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
         conversationUpdatedAtRef.current = 0
         lastSavedCountRef.current = 0
         pendingConversationReloadRef.current = null
+        resetWechatPushState()
         setPlayedVoice(new Set())
         setRevealedVoice(new Set())
         return
@@ -821,6 +882,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     lastSavedCountRef.current = 0
     conversationUpdatedAtRef.current = 0
     pendingConversationReloadRef.current = null
+    resetWechatPushState()
     setPhase('confirm')
     onPersonaChanged?.()
   }
@@ -972,6 +1034,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     lastSavedCountRef.current = 0
     conversationUpdatedAtRef.current = 0
     pendingConversationReloadRef.current = null
+    resetWechatPushState()
     setPlayedVoice(new Set())
     setRevealedVoice(new Set())
     setVisibleMessageCount(INITIAL_RENDERED_MESSAGE_COUNT)
@@ -991,6 +1054,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
       lastSavedCountRef.current = 0
       conversationUpdatedAtRef.current = 0
       pendingConversationReloadRef.current = null
+      resetWechatPushState()
       setPlayedVoice(new Set())
       setRevealedVoice(new Set())
     }
@@ -1010,6 +1074,9 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
           setConversationId(record.id)
           conversationIdRef.current = record.id
           conversationUpdatedAtRef.current = Number(record.updatedAt || Date.now())
+          conversationSourceRef.current = String((record as { source?: unknown }).source || '')
+          wechatKnownAssistantMessageIdsRef.current = new Set()
+          wechatPushPendingMessageIdsRef.current = new Set()
         }
       } catch { /* 创建失败不阻塞发送，本轮不持久化 */ }
     }

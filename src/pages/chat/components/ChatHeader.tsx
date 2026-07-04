@@ -1,4 +1,4 @@
-import { Aperture, ArrowDownToLine, ArrowsRotateLeft, Bell, BellSlash, Bulb, CircleCheck, CircleDashed, CircleInfo, FaceRobot, FileText, Layers, Microphone, Picture, Sparkles } from '@gravity-ui/icons'
+import { Aperture, ArrowDownToLine, ArrowsRotateLeft, Bell, BellSlash, Bulb, CircleCheck, CircleDashed, CircleInfo, FaceRobot, FileText, Layers, LayoutSideContentRight, Microphone, Picture, Sparkles } from '@gravity-ui/icons'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Drawer, Dropdown, Label, Switch, Tooltip } from '@heroui/react'
 import { CloneSelfModal } from './CloneSelfModal'
@@ -18,6 +18,9 @@ import {
 } from '../replySuggest'
 import { SessionAvatar } from './SessionSidebar'
 import PluginChatToolbar from '../../../features/plugins/PluginChatToolbar'
+
+// 磁贴窗口靠 Win32 跟踪微信主窗口，仅 Windows 可用，非 Windows 不显示该开关
+const IS_WINDOWS = navigator.platform.toLowerCase().includes('win')
 
 type Progress = {
   current: number
@@ -224,8 +227,13 @@ export function ChatHeader({
   }, [currentSession.username])
 
   const patchReplySettings = useCallback((patch: Partial<ReplySuggestSettings>) => {
-    setReplySettings((prev) => ({ ...prev, ...patch }))
-    void updateReplySuggestSettings(currentSession.username, patch)
+    // 打开自动建议时联动打开「参与磁贴」（可随后单独关闭）
+    const effective = patch.enabled === true ? { ...patch, tile: true } : patch
+    setReplySettings((prev) => ({ ...prev, ...effective }))
+    void updateReplySuggestSettings(currentSession.username, effective).then(() => {
+      // 配置写入后再重算参与列表，避免主进程读到旧配置。
+      window.electronAPI.window.replyTileRefresh()
+    })
   }, [currentSession.username])
 
   // 自画像状态：是否已克隆"我"对此联系人的说话画像（self: 前缀键），用于菜单显示
@@ -612,6 +620,26 @@ export function ChatHeader({
                     </Switch>
                   </span>
                 </Dropdown.Item>
+                {IS_WINDOWS && (
+                  <Dropdown.Item id="tile" textValue="磁贴窗口">
+                    <LayoutSideContentRight className="size-4 shrink-0 text-muted" />
+                    <Label>磁贴窗口</Label>
+                    <span
+                      className="ml-auto inline-flex pointer-events-auto"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Switch
+                        aria-label="磁贴窗口"
+                        isSelected={replySettings.tile}
+                        onChange={(v) => patchReplySettings({ tile: v })}
+                      >
+                        <Switch.Control>
+                          <Switch.Thumb />
+                        </Switch.Control>
+                      </Switch>
+                    </span>
+                  </Dropdown.Item>
+                )}
                 <Dropdown.SubmenuTrigger>
                   <Dropdown.Item id="style" textValue="风格">
                     <Label className="min-w-0 flex-1 text-left">风格</Label>

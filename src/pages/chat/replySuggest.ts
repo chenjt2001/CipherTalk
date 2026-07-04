@@ -12,6 +12,8 @@ export type ReplySuggestSettings = {
   count: number
   /** 深度模式：更长历史上下文 + 子进程内带会话检索工具的小步 Agent 循环 */
   deep: boolean
+  /** 磁贴窗口：把建议贴到微信主窗口旁的独立窗口显示（仅 Windows） */
+  tile: boolean
 }
 
 export const REPLY_SUGGEST_CONFIG_KEY = 'replySuggestSessions'
@@ -32,6 +34,7 @@ export const DEFAULT_REPLY_SUGGEST_SETTINGS: ReplySuggestSettings = {
   style: 'natural',
   count: 3,
   deep: false,
+  tile: false,
 }
 
 type SettingsMap = Record<string, Partial<ReplySuggestSettings> | undefined>
@@ -44,6 +47,7 @@ export function normalizeReplySuggestSettings(raw: Partial<ReplySuggestSettings>
     style: raw?.style && STYLE_IDS.has(raw.style) ? raw.style : DEFAULT_REPLY_SUGGEST_SETTINGS.style,
     count: REPLY_SUGGEST_COUNTS.includes(Number(raw?.count)) ? Number(raw?.count) : DEFAULT_REPLY_SUGGEST_SETTINGS.count,
     deep: raw?.deep === true,
+    tile: raw?.tile === true,
   }
 }
 
@@ -185,6 +189,12 @@ export const SUGGEST_BURST_JOINER = '／'
 export function splitSuggestionBursts(text: string): string[] {
   const segs = text.split(SUGGEST_BURST_JOINER).map((t) => t.trim()).filter(Boolean)
   return segs.length > 0 ? segs : [text.trim()]
+}
+
+const SENTENCE_SEGMENT_LABELS = ['第一句', '第二句', '第三句', '第四句', '第五句', '第六句', '第七句', '第八句', '第九句', '第十句']
+
+export function sentenceSegmentLabel(index: number): string {
+  return SENTENCE_SEGMENT_LABELS[index] || `第${index + 1}句`
 }
 
 /**

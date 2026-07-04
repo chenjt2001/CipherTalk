@@ -18,6 +18,25 @@ export type ImageViewerOpenOptions = {
   imageDatName?: string
 }
 
+/** 磁贴窗口里单个会话的条目。pending=参与但还没建议；gone=已退出参与，从磁贴移除。 */
+export type ReplyTileBatch = {
+  id: string
+  targetKey: string
+  quote: string
+  suggestions: string[]
+}
+
+export type ReplyTileEntry = {
+  sessionId: string
+  sessionName: string
+  avatarUrl?: string
+  state: 'pending' | 'loading' | 'error' | 'ready' | 'gone'
+  suggestions?: string[]
+  batches?: ReplyTileBatch[]
+  pendingContinue?: boolean
+  error?: string
+}
+
 export interface WindowManager {
   createMainWindow(): BrowserWindow
   createSplashWindow(): BrowserWindow
@@ -51,6 +70,11 @@ export interface WindowManager {
   isPetWindowOpen(): boolean
   showPetContextMenu(): void
   setPetBubbleExpanded(expanded: boolean): void
+  /** 全局磁贴总开关：开=常驻贴微信旁 + 启动后台生成；关=关闭磁贴 + 停后台 */
+  setReplyTileEnabled(enabled: boolean): void
+  isReplyTileEnabled(): boolean
+  /** 更新/移除磁贴里某会话的条目（来自渲染端当前会话或主进程后台生成） */
+  updateReplyTileEntry(entry: ReplyTileEntry): void
 }
 
 export interface MainProcessContext {

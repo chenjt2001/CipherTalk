@@ -1611,9 +1611,33 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       const { resolveProviderConfig } = await import('../../services/agent/resolveProviderConfig')
       const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
       await refreshResolvedProxyUrl()
+      const input = payload.input
+      if (input.deep === true) {
+        const { agentProfileService } = await import('../../services/agent/agentProfileService')
+        const sessionId = String(input.sessionId || '').trim()
+        const contactName = String(input.contactName || '').trim()
+        const queryText = input.context.map((m) => m.text).join('\n').slice(-2000)
+        const profile = await agentProfileService.resolve({
+          mode: 'app',
+          scope: sessionId ? { kind: 'session', sessionId, displayName: contactName || undefined } : { kind: 'global' },
+          modelConfig: payload.modelConfig,
+          toolProfile: 'hybrid',
+          includeMcpSkills: true,
+          queryText,
+        })
+        const result = await agentProcessService.replySuggest({
+          ...input,
+          providerConfig: profile.providerConfig,
+          mcpTools: profile.mcpTools,
+          skills: profile.skills,
+          toolProfile: profile.toolProfile,
+          codeWorkspace: profile.codeWorkspace,
+        })
+        return { success: true, ...result }
+      }
       const providerConfig = resolveProviderConfig(payload.modelConfig)
       const result = await agentProcessService.replySuggest({
-        ...payload.input,
+        ...input,
         providerConfig,
       })
       return { success: true, ...result }

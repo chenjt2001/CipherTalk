@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Description, Label, Radio, RadioGroup, Slider, Switch, Tabs, type Key } from '@heroui/react'
 import { ArrowUpToLine, Display, LayoutFooter, LayoutSideContentLeft, Moon, Picture, Sun, Video } from '@gravity-ui/icons'
 import {
@@ -16,6 +16,9 @@ import QuoteStyleOptionCard, { type QuoteStyle } from '../QuoteStyleOptionCard'
 import Select from '../../Select'
 
 type ThemeMode = 'light' | 'dark' | 'system'
+
+// 磁贴窗口靠 Win32 跟踪微信主窗口，仅 Windows 可用
+const IS_WINDOWS = navigator.platform.toLowerCase().includes('win')
 
 const toThemeMode = (key: Key): ThemeMode => String(key) as ThemeMode
 const toNavLayout = (key: Key): NavLayout => String(key) as NavLayout
@@ -79,6 +82,11 @@ function AppearanceTab() {
   const hardwareAccelerationEnabled = useSettingsStore(s => s.config.hardwareAccelerationEnabled)
   const setField = useSettingsStore(s => s.setField)
   const userInfo = useAppStore(s => s.userInfo)
+  // 磁贴全局开关：立即生效（不走设置页的暂存-保存模型），本地态从主进程读
+  const [replyTileEnabled, setReplyTileEnabled] = useState(false)
+  useEffect(() => {
+    if (IS_WINDOWS) void window.electronAPI.window.getReplyTileEnabled().then(setReplyTileEnabled)
+  }, [])
   const [backgroundImporting, setBackgroundImporting] = useState(false)
   const [backgroundError, setBackgroundError] = useState('')
   const avatarUrl = normalizeImageSrc(userInfo?.avatarUrl)
@@ -137,6 +145,25 @@ function AppearanceTab() {
           </Tabs.List>
         </Tabs.ListContainer>
       </Tabs>
+
+      {IS_WINDOWS && (
+        <>
+          <h3 className="section-title" style={{ marginTop: '2rem' }}>回复建议磁贴</h3>
+          <Switch
+            className="max-w-2xl"
+            isSelected={replyTileEnabled}
+            onChange={(enabled) => { void window.electronAPI.window.setReplyTileEnabled(enabled).then(setReplyTileEnabled) }}
+          >
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+            <Switch.Content>
+              <Label>磁贴窗口常显示</Label>
+              <Description>开启后，磁贴会常驻贴在微信主窗口旁（放不下自动翻到左侧），显示已在聊天窗口开启「磁贴窗口」参与的会话的回复建议。关闭则不显示。</Description>
+            </Switch.Content>
+          </Switch>
+        </>
+      )}
 
       <h3 className="section-title" style={{ marginTop: '2rem' }}>导航布局</h3>
       <Tabs selectedKey={navLayout} onSelectionChange={(key) => setNavLayout(toNavLayout(key))} className="w-full max-w-md">

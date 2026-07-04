@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import type { ImageViewerListItem, ImageViewerOpenOptions, MainProcessContext } from '../context'
+import type { ImageViewerListItem, ImageViewerOpenOptions, MainProcessContext, ReplyTileEntry } from '../context'
+import { replyTileService } from '../../services/replyTileService'
 
 type TitleBarOverlayState = {
   hidden: boolean
@@ -136,6 +137,46 @@ export function registerWindowHandlers(ctx: MainProcessContext): void {
   ipcMain.handle('window:openSkillPreviewWindow', (_, skillName: string) => {
     ctx.getWindowManager().openSkillPreviewWindow(skillName)
     return true
+  })
+
+  // 磁贴后台生成服务 + 启动时按全局开关恢复
+  replyTileService.init(ctx)
+  if (process.platform === 'win32' && ctx.getConfigService()?.get('replyTileEnabled') === true) {
+    ctx.getWindowManager().setReplyTileEnabled(true)
+    replyTileService.setRunning(true)
+  }
+
+  // 渲染端当前会话把已生成的建议镜像进磁贴（全保真：图片/画像/语音转写）
+  ipcMain.on('reply-tile:push', (_event, entry: ReplyTileEntry) => {
+    // gone 只能删除「配置里已不参与」的会话；切会话/配置加载瞬间的误发不能删全局条目。
+    if (entry.state === 'gone' && replyTileService.isParticipating(entry.sessionId)) return
+    ctx.getWindowManager().updateReplyTileEntry(entry)
+  })
+
+  ipcMain.on('reply-tile:continue', (_event, sessionId: string) => {
+    replyTileService.continueGeneration(sessionId)
+    ctx.broadcastToWindows('reply-tile:continue', sessionId)
+  })
+
+  ipcMain.on('reply-tile:skip', (_event, sessionId: string) => {
+    replyTileService.skip(sessionId)
+    ctx.broadcastToWindows('reply-tile:skip', sessionId)
+  })
+
+  ipcMain.handle('window:setReplyTileEnabled', (_event, enabled: boolean) => {
+    const on = Boolean(enabled)
+    ctx.getConfigService()?.set('replyTileEnabled', on)
+    ctx.getWindowManager().setReplyTileEnabled(on)
+    replyTileService.setRunning(on)
+    return on
+  })
+
+  ipcMain.handle('window:getReplyTileEnabled', () => {
+    return process.platform === 'win32' && ctx.getConfigService()?.get('replyTileEnabled') === true
+  })
+
+  ipcMain.on('window:replyTileRefresh', () => {
+    void replyTileService.refresh()
   })
 
   ipcMain.handle('window:openChatHistoryWindow', (_, sessionId: string, messageId: number) => {

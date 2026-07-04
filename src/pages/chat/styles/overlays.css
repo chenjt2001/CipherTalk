@@ -764,6 +764,46 @@ video::-webkit-media-controls-fullscreen-button {
   animation: reply-suggest-in 0.18s ease-out;
 }
 
+.reply-suggest-bar__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.reply-suggest-bar__batches {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reply-suggest-bar__batch {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.reply-suggest-bar__quote {
+  pointer-events: auto;
+  align-self: flex-start;
+  max-width: min(520px, 100%);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary, #fff) 74%, transparent);
+  color: var(--text-tertiary, #888);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
 .reply-suggest-bar__cards {
   display: flex;
   flex-wrap: wrap;
@@ -821,12 +861,14 @@ video::-webkit-media-controls-fullscreen-button {
 
 .reply-suggest-bar__seg-index {
   flex-shrink: 0;
-  min-width: 15px;
-  height: 15px;
-  border-radius: 8px;
+  min-width: 42px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
   font-size: 10px;
-  line-height: 15px;
+  line-height: 18px;
   text-align: center;
+  white-space: nowrap;
   color: var(--text-tertiary, #999);
   background: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
 }
@@ -843,6 +885,27 @@ video::-webkit-media-controls-fullscreen-button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--bg-secondary, #fff) 62%, transparent) 0%,
+    color-mix(in srgb, var(--bg-secondary, #fff) 36%, transparent) 100%
+  );
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  color: var(--text-secondary, #888);
+  font-size: 12px;
+}
+
+.reply-suggest-bar__continue {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 10px;
   padding: 6px 12px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
@@ -875,6 +938,7 @@ video::-webkit-media-controls-fullscreen-button {
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
   gap: 6px;
   padding: 6px 12px;
   border: 1px solid rgba(255, 255, 255, 0.15);

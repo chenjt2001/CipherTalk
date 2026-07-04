@@ -19,7 +19,8 @@ import { appUpdateService } from '../../services/appUpdateService'
 import { mcpProxyService } from '../../services/mcp/proxyService'
 import { voiceTranscribeServiceWhisper } from '../../services/voiceTranscribeServiceWhisper'
 import { attachWindowStartupDiagnostics, markStartupMilestone, logStartupError } from '../startupDiagnostics'
-import type { ImageViewerOpenOptions, MainProcessContext, WindowManager } from '../context'
+import type { ImageViewerOpenOptions, MainProcessContext, ReplyTileEntry, WindowManager } from '../context'
+import { probeWeChatWindow } from '../../services/wechatWindowTracker'
 
 type ReleaseAnnouncementPayload = {
   version: string
@@ -277,6 +278,14 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
   let personaChatWindow: BrowserWindow | null = null
   let posterStyleWindow: BrowserWindow | null = null
   let petWindow: BrowserWindow | null = null
+  let replyTileWindow: BrowserWindow | null = null
+  let replyTileTimer: NodeJS.Timeout | null = null
+  let replyTileLastBounds = ''
+  let replyTileFloating = true
+  let replyTileEnabled = false
+  // 磁贴里各会话最新条目，供新建/重载窗口后回灌
+  const replyTileEntries = new Map<string, ReplyTileEntry>()
+  const REPLY_TILE_WIDTH = 340
   let petBaseBounds: { x: number; y: number; width: number; height: number } | null = null
   // 桌宠基础尺寸（与 openPetWindow 一致）；显示消息气泡时临时向上/左扩窗腾出空间
   const PET_BASE_WIDTH = 150
@@ -295,6 +304,92 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
     petWindow = null
     petBaseBounds = null
     petBubbleExpanded = false
+  }
+
+  const closeReplyTileInternal = (): void => {
+    if (replyTileTimer) { clearInterval(replyTileTimer); replyTileTimer = null }
+    if (replyTileWindow && !replyTileWindow.isDestroyed()) replyTileWindow.close()
+    replyTileWindow = null
+    replyTileLastBounds = ''
+    replyTileFloating = true
+  }
+
+  const setReplyTileFloating = (floating: boolean): void => {
+    if (!replyTileWindow || replyTileWindow.isDestroyed() || replyTileFloating === floating) return
+    replyTileFloating = floating
+    if (floating) replyTileWindow.setAlwaysOnTop(true, 'screen-saver')
+    else replyTileWindow.setAlwaysOnTop(false)
+  }
+
+  // Reply tile follows the WeChat main window edge.
+  // Do not hide it just because another app becomes foreground; hide only when WeChat is missing/minimized.
+  const repositionReplyTile = (): void => {
+    if (!replyTileWindow || replyTileWindow.isDestroyed()) return
+    const state = probeWeChatWindow()
+    const show = state.found && !state.minimized && state.bounds
+    if (!show) {
+      if (replyTileWindow.isVisible()) replyTileWindow.hide()
+      return
+    }
+    const tileFocused = replyTileWindow.isFocused()
+    setReplyTileFloating(state.foregroundActive || tileFocused)
+    const wx = state.bounds!
+    const wa = screen.getDisplayMatching(wx).workArea
+    let x = wx.x + wx.width
+    if (x + REPLY_TILE_WIDTH > wa.x + wa.width) x = wx.x - REPLY_TILE_WIDTH // 翻到左侧
+    x = Math.max(wa.x, x)
+    const y = Math.max(wa.y, wx.y)
+    const height = Math.min(wx.height, wa.y + wa.height - y)
+    const bounds = { x: Math.round(x), y: Math.round(y), width: REPLY_TILE_WIDTH, height: Math.round(height) }
+    const key = `${bounds.x},${bounds.y},${bounds.height}`
+    if (key !== replyTileLastBounds) {
+      replyTileWindow.setBounds(bounds)
+      replyTileLastBounds = key
+    }
+    if (!replyTileWindow.isVisible()) replyTileWindow.showInactive()
+  }
+
+  const openReplyTileWindow = (): void => {
+    if (replyTileWindow && !replyTileWindow.isDestroyed()) return
+    replyTileWindow = new BrowserWindow({
+      width: REPLY_TILE_WIDTH,
+      height: 400,
+      frame: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      resizable: false,
+      maximizable: false,
+      minimizable: false,
+      fullscreenable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      hasShadow: false,
+      show: false,
+      webPreferences: {
+        preload: join(__dirname, 'preload.js'),
+        devTools: ctx.allowDevTools,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: false
+      }
+    })
+    replyTileWindow.setAlwaysOnTop(true, 'screen-saver')
+    replyTileWindow.on('closed', () => {
+      if (replyTileTimer) { clearInterval(replyTileTimer); replyTileTimer = null }
+      replyTileWindow = null
+      replyTileLastBounds = ''
+      replyTileFloating = true
+    })
+    // 窗口加载完成后回灌现有条目（新建/重载都能拿到当前全量）
+    replyTileWindow.webContents.on('did-finish-load', () => {
+      if (!replyTileWindow || replyTileWindow.isDestroyed()) return
+      for (const entry of replyTileEntries.values()) {
+        replyTileWindow.webContents.send('reply-tile:update', entry)
+      }
+    })
+    loadWindowRoute(ctx, replyTileWindow, '/reply-tile-window')
+    replyTileTimer = setInterval(repositionReplyTile, 120)
+    replyTileTimer.unref?.()
   }
 
   const setPetWindowMaterial = (_expanded: boolean): void => {
@@ -1404,6 +1499,31 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       if (!expanded) {
         petBaseBounds = null
       }
+    },
+
+    setReplyTileEnabled(enabled: boolean) {
+      if (process.platform !== 'win32') return // 磁贴仅 Windows：靠 Win32 跟踪微信窗口
+      replyTileEnabled = enabled
+      if (enabled) {
+        openReplyTileWindow()
+      } else {
+        replyTileEntries.clear()
+        closeReplyTileInternal()
+      }
+    },
+
+    isReplyTileEnabled() {
+      return replyTileEnabled
+    },
+
+    updateReplyTileEntry(entry: ReplyTileEntry) {
+      if (!replyTileEnabled) return
+      if (entry.state === 'gone') replyTileEntries.delete(entry.sessionId)
+      else replyTileEntries.set(entry.sessionId, entry)
+      if (replyTileWindow && !replyTileWindow.isDestroyed() && !replyTileWindow.webContents.isLoading()) {
+        replyTileWindow.webContents.send('reply-tile:update', entry)
+      }
+      // 窗口还在加载时不单独发：did-finish-load 会回灌全量
     }
   }
 

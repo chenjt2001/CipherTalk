@@ -501,6 +501,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openVideoPlayerWindow: (videoPath: string, videoWidth?: number, videoHeight?: number) => ipcRenderer.invoke('window:openVideoPlayerWindow', videoPath, videoWidth, videoHeight),
     openBrowserWindow: (url: string, title?: string) => ipcRenderer.invoke('window:openBrowserWindow', url, title),
     openSkillPreviewWindow: (skillName: string) => ipcRenderer.invoke('window:openSkillPreviewWindow', skillName) as Promise<boolean>,
+    setReplyTileEnabled: (enabled: boolean) => ipcRenderer.invoke('window:setReplyTileEnabled', enabled) as Promise<boolean>,
+    getReplyTileEnabled: () => ipcRenderer.invoke('window:getReplyTileEnabled') as Promise<boolean>,
+    replyTileRefresh: () => ipcRenderer.send('window:replyTileRefresh'),
+    replyTile: {
+      push: (entry: { sessionId: string; sessionName: string; avatarUrl?: string; state: 'pending' | 'loading' | 'error' | 'ready' | 'gone'; suggestions?: string[]; batches?: Array<{ id: string; targetKey: string; quote: string; suggestions: string[] }>; pendingContinue?: boolean; error?: string }) =>
+        ipcRenderer.send('reply-tile:push', entry),
+      continue: (sessionId: string) => ipcRenderer.send('reply-tile:continue', sessionId),
+      skip: (sessionId: string) => ipcRenderer.send('reply-tile:skip', sessionId),
+      onUpdate: (callback: (entry: { sessionId: string; sessionName: string; avatarUrl?: string; state: 'pending' | 'loading' | 'error' | 'ready' | 'gone'; suggestions?: string[]; batches?: Array<{ id: string; targetKey: string; quote: string; suggestions: string[] }>; pendingContinue?: boolean; error?: string }) => void) => {
+        const listener = (_: unknown, entry: any) => callback(entry)
+        ipcRenderer.on('reply-tile:update', listener)
+        return () => ipcRenderer.removeListener('reply-tile:update', listener)
+      },
+      onContinue: (callback: (sessionId: string) => void) => {
+        const listener = (_: unknown, sessionId: string) => callback(sessionId)
+        ipcRenderer.on('reply-tile:continue', listener)
+        return () => ipcRenderer.removeListener('reply-tile:continue', listener)
+      },
+      onSkip: (callback: (sessionId: string) => void) => {
+        const listener = (_: unknown, sessionId: string) => callback(sessionId)
+        ipcRenderer.on('reply-tile:skip', listener)
+        return () => ipcRenderer.removeListener('reply-tile:skip', listener)
+      }
+    },
     openChatHistoryWindow: (sessionId: string, messageId: number) => ipcRenderer.invoke('window:openChatHistoryWindow', sessionId, messageId),
     resizeToFitVideo: (videoWidth: number, videoHeight: number) => ipcRenderer.invoke('window:resizeToFitVideo', videoWidth, videoHeight),
     resizeContent: (width: number, height: number) => ipcRenderer.invoke('window:resizeContent', width, height),

@@ -473,6 +473,17 @@ export interface ElectronAPI {
     resizeToFitVideo: (videoWidth: number, videoHeight: number) => Promise<void>
     openChatHistoryWindow: (sessionId: string, messageId: number) => Promise<boolean>
     onImageListUpdate: (callback: (data: { imageList: ImageListItem[], currentIndex: number }) => void) => () => void
+    setReplyTileEnabled: (enabled: boolean) => Promise<boolean>
+    getReplyTileEnabled: () => Promise<boolean>
+    replyTileRefresh: () => void
+    replyTile: {
+      push: (entry: { sessionId: string; sessionName: string; avatarUrl?: string; state: 'pending' | 'loading' | 'error' | 'ready' | 'gone'; suggestions?: string[]; batches?: Array<{ id: string; targetKey: string; quote: string; suggestions: string[] }>; pendingContinue?: boolean; error?: string }) => void
+      continue: (sessionId: string) => void
+      skip: (sessionId: string) => void
+      onUpdate: (callback: (entry: { sessionId: string; sessionName: string; avatarUrl?: string; state: 'pending' | 'loading' | 'error' | 'ready' | 'gone'; suggestions?: string[]; batches?: Array<{ id: string; targetKey: string; quote: string; suggestions: string[] }>; pendingContinue?: boolean; error?: string }) => void) => () => void
+      onContinue: (callback: (sessionId: string) => void) => () => void
+      onSkip: (callback: (sessionId: string) => void) => () => void
+    }
   }
   config: {
     get: (key: string) => Promise<unknown>
